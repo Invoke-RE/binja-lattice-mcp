@@ -5,8 +5,6 @@ from binaryninja.function import DisassemblySettings, Function
 from binaryninja.lineardisassembly import LinearViewCursor, LinearViewObject
 from binaryninja.plugin import PluginCommand
 import json
-import socket
-import threading
 import logging
 import os
 import secrets
@@ -15,6 +13,9 @@ import ssl
 from typing import Optional, Dict, Any, List, Tuple
 import re
 import traceback
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import threading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -121,530 +122,393 @@ class AuthManager:
         # In a real implementation, this would use secure password hashing
         return password == self.api_key
 
-class BinjaLattice:
-    """
-    Protocol for communicating between Binary Ninja an external MCP Server or tools.
-    This protocol handles sending context from Binary Ninja to MCP Server and receiving
-    responses to integrate back into the Binary Ninja UI.
-    """
+class LatticeRequestHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the Lattice Protocol"""
     
-    def __init__(self, bv: BinaryView, port: int = 9000, host: str = "localhost", use_ssl: bool = False):
-        """
-        Initialize the model context protocol.
+    def __init__(self, *args, **kwargs):
+        self.protocol = kwargs.pop('protocol')
+        super().__init__(*args, **kwargs)
+    
+    def _send_response(self, data: Dict[str, Any], status: int = 200):
+        """Send JSON response"""
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+    
+    def _require_auth(self, handler):
+        """Decorator to require authentication"""
+        def decorated(*args, **kwargs):
+            auth_header = self.headers.get('Authorization')
+            if not auth_header:
+                self._send_response({'status': 'error', 'message': 'No token provided'}, 401)
+                return
+            
+            # Remove 'Bearer ' prefix if present
+            token = auth_header[7:] if auth_header.startswith('Bearer ') else auth_header
+            
+            is_valid, client_info = self.protocol.auth_manager.validate_token(token)
+            if not is_valid:
+                self._send_response({'status': 'error', 'message': 'Invalid token'}, 401)
+                return
+            
+            return handler(*args, **kwargs)
+        return decorated
+    
+    def do_POST(self):
+        """Handle POST requests"""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
         
-        Args:
-            bv: BinaryView object representing the currently analyzed binary
-            port: Port number for communication
-            host: Host address for the server
-            use_ssl: Whether to use SSL/TLS encryption
-        """
-        self.bv = bv
-        self.port = port
-        self.host = host
-        self.use_ssl = use_ssl
-        self.server_socket = None
-        self.server_thread = None
-        self.running = False
-        self.clients = []
-        self.auth_manager = AuthManager()
-        
-    def start_server(self):
-        """Start the server to listen for model connections"""
-        if self.running:
-            logger.warning("Server is already running")
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode())
+        except Exception as e:
+            self._send_response({'status': 'error', 'message': str(e)}, 400)
             return
-            
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
-        try:
-            self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(5)
-            self.running = True
-            
-            if self.use_ssl:
-                # Configure SSL context
-                self._setup_ssl()
-            
-            logger.info(f"Server started on {self.host}:{self.port}")
-            logger.info(f"Authentication API key: {self.auth_manager.api_key}")
-            logger.info(f"Use this key to authenticate clients")
-            
-            self.server_thread = threading.Thread(target=self._accept_connections)
-            self.server_thread.daemon = True
-            self.server_thread.start()
-            
-        except Exception as e:
-            logger.error(f"Failed to start server: {e}")
-            self.stop_server()
-    
-    def _setup_ssl(self):
-        """Set up SSL/TLS for the server"""
-        # In a real implementation, use proper certificates
-        # For development, we generate a self-signed certificate
-        try:
-            cert_file = os.path.join(os.path.dirname(__file__), "server.crt")
-            key_file = os.path.join(os.path.dirname(__file__), "server.key")
-            
-            # Check if cert and key files exist, generate if not
-            if not (os.path.exists(cert_file) and os.path.exists(key_file)):
-                self._generate_self_signed_cert(cert_file, key_file)
-            
-            self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            self.ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
-            
-            logger.info("SSL/TLS configured successfully")
-        except Exception as e:
-            logger.error(f"Failed to configure SSL/TLS: {e}")
-            self.use_ssl = False
-    
-    def _generate_self_signed_cert(self, cert_file, key_file):
-        """Generate self-signed certificate for development purposes"""
-        from OpenSSL import crypto
-        
-        # Create a key pair
-        k = crypto.PKey()
-        k.generate_key(crypto.TYPE_RSA, 2048)
-        
-        # Create a self-signed cert
-        cert = crypto.X509()
-        cert.get_subject().C = "US"
-        cert.get_subject().ST = "State"
-        cert.get_subject().L = "Locality"
-        cert.get_subject().O = "BinjaLattice"
-        cert.get_subject().OU = "BinjaLattice Server"
-        cert.get_subject().CN = self.host
-        cert.set_serial_number(1000)
-        cert.gmtime_adj_notBefore(0)
-        cert.gmtime_adj_notAfter(365*24*60*60)
-        cert.set_issuer(cert.get_subject())
-        cert.set_pubkey(k)
-        cert.sign(k, 'sha256')
-        
-        # Write to disk
-        with open(cert_file, "wb") as f:
-            f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-        with open(key_file, "wb") as f:
-            f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
-        
-        logger.info(f"Self-signed certificate generated at {cert_file}")
-    
-    def _accept_connections(self):
-        """Accept incoming connections from models"""
-        while self.running:
-            try:
-                client_socket, addr = self.server_socket.accept()
-                logger.info(f"New connection from {addr}")
-                
-                if self.use_ssl:
-                    try:
-                        client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
-                        logger.info(f"SSL/TLS handshake completed with {addr}")
-                    except ssl.SSLError as e:
-                        logger.error(f"SSL/TLS handshake failed with {addr}: {e}")
-                        client_socket.close()
-                        continue
-                
-                client_thread = threading.Thread(
-                    target=self._handle_client,
-                    args=(client_socket, addr)
-                )
-                client_thread.daemon = True
-                client_thread.start()
-                
-                self.clients.append((client_socket, client_thread))
-                
-            except Exception as e:
-                if self.running:
-                    logger.error(f"Error accepting connection: {e}")
-    
-    def _handle_client(self, client_socket, addr):
-        """Handle communication with a connected model client"""
-        authenticated = False
-        auth_token = None
-        
-        try:
-            # First, handle authentication
-            auth_data = self._receive_data(client_socket)
-            if not auth_data:
-                return
-            
-            auth_request = json.loads(auth_data)
-            if auth_request.get('type') != 'authenticate':
-                logger.warning(f"Client {addr} sent a non-authentication request first, closing connection")
-                return
-            
-            # Check credentials
-            username = auth_request.get('username')
-            password = auth_request.get('password')
-            token = auth_request.get('token')
-            
-            if token:
-                # Token-based auth
-                authenticated, client_info = self.auth_manager.validate_token(token)
-                if authenticated:
-                    auth_token = token
-                    logger.info(f"Client {addr} authenticated with token")
-            elif username and password:
-                # Username/password auth
-                authenticated = self.auth_manager.verify_credentials(username, password)
-                if authenticated:
-                    client_info = {'username': username, 'address': addr}
-                    auth_token = self.auth_manager.generate_token(client_info)
-                    logger.info(f"Client {addr} authenticated with username/password")
-            
-            # Send authentication response
-            auth_response = {
-                'status': 'success' if authenticated else 'error',
-                'message': 'Authentication successful' if authenticated else 'Authentication failed',
-            }
-            
-            if authenticated:
-                auth_response['token'] = auth_token
-            
-            self._send_data(client_socket, json.dumps(auth_response))
-            
-            if not authenticated:
-                logger.warning(f"Authentication failed for client {addr}, closing connection")
-                return
-            
-            # Now handle regular requests
-            while self.running:
-                data = self._receive_data(client_socket)
-                if not data:
-                    break
-                    
-                request = json.loads(data)
-                
-                # Make sure token is included and valid in each request
-                request_token = request.get('token')
-                if not request_token or request_token != auth_token:
-                    response = {'status': 'error', 'message': 'Invalid or missing token'}
-                else:
-                    response = self._process_request(request)
-                
-                self._send_data(client_socket, json.dumps(response))
-                
-        except Exception as e:
-            logger.error(f"Error handling client {addr}: {e}")
-        finally:
-            client_socket.close()
-            logger.info(f"Connection closed with {addr}")
-    
-    def _receive_data(self, client_socket) -> Optional[str]:
-        """Receive data from the client with proper message framing"""
-        try:
-            # First receive the message length (4 bytes)
-            length_bytes = client_socket.recv(4)
-            if not length_bytes:
-                return None
-                
-            message_length = int.from_bytes(length_bytes, byteorder='big')
-            
-            # Now receive the actual message
-            chunks = []
-            bytes_received = 0
-            
-            while bytes_received < message_length:
-                chunk = client_socket.recv(min(4096, message_length - bytes_received))
-                if not chunk:
-                    return None
-                chunks.append(chunk)
-                bytes_received += len(chunk)
-                
-            return b''.join(chunks).decode('utf-8')
-            
-        except Exception as e:
-            logger.error(f"Error receiving data: {e}")
-            return None
-    
-    def _send_data(self, client_socket, data: str) -> bool:
-        """Send data to the client with proper message framing"""
-        try:
-            message_bytes = data.encode('utf-8')
-            message_length = len(message_bytes)
-            
-            # Send the message length first (4 bytes)
-            client_socket.sendall(message_length.to_bytes(4, byteorder='big'))
-            
-            # Send the actual message
-            client_socket.sendall(message_bytes)
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error sending data: {e}")
-            return False
-        
-    def _handle_get_all_function_names(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get all function names"""
-        try:
-            function_names = [func.name for func in self.bv.functions]
-            return {'status': 'success', 'function_names': function_names}
-        except Exception as e:
-            logger.error(f"Error getting all function names: {e}")
-            return {'status': 'error', 'message': str(e)}
-        
-    def _handle_get_function_context_by_name(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get function context by name"""
-        try:
-            function_name = request.get('function_name')
-            if function_name is None:
-                return {'status': 'error', 'message': 'Function name is required'}  
-            func = self.bv.get_function_by_name(function_name)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found with name: {function_name}'}
-            request['address'] = func.start
-            return self._handle_function_context_request(request)
-        except Exception as e:
-            logger.error(f"Error getting function context by name: {e}")
-            return {'status': 'error', 'message': str(e)}
-
-    def _process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a request from a model client"""
-        request_type = request.get('type')
-        
-        if request_type == 'get_function_context':
-            return self._handle_function_context_request(request)
-        elif request_type == 'get_basic_block_context':
-            return self._handle_basic_block_context_request(request)
-        elif request_type == 'update_function_name':
-            return self._handle_update_function_name(request)
-        elif request_type == 'update_variable_name':
-            return self._handle_update_variable_name(request)
-        elif request_type == 'add_comment':
-            return self._handle_add_comment(request)
-        elif request_type == 'get_binary_info':
-            return self._handle_get_binary_info(request)
-        elif request_type == 'get_all_function_names':
-            return self._handle_get_all_function_names(request)
-        elif request_type == 'get_function_context_by_name':
-            return self._handle_get_function_context_by_name(request)
-        elif request_type == 'get_function_disassembly':
-            return self._handle_get_function_disassembly(request)
-        elif request_type == 'get_function_pseudocode':
-            return self._handle_get_function_pseudocode(request)
-        elif request_type == 'get_function_variables':
-            return self._handle_get_function_variables(request)
+        if path == '/auth':
+            self._handle_auth(data)
+        elif path.startswith('/comments/'):
+            self._require_auth(self._handle_add_comment)(data)
         else:
-            return {'status': 'error', 'message': f'Unknown request type: {request_type}'}
+            self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
-    def _handle_function_context_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request for function context"""
+    def do_PUT(self):
+        """Handle PUT requests"""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
         try:
-            logger.info("Starting function context request handling")
-            address = request.get('address')
-            if address is None:
-                logger.info("No address provided in request")
-                return {'status': 'error', 'message': 'Address is required'}
-            
-            logger.info(f"Looking for function containing address 0x{address:x}")
-            func = self.bv.get_functions_containing(address)[0]
-            if func is None:
-                logger.info(f"No function found at address 0x{address:x}")
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            logger.info(f"Found function: {func.name} at 0x{func.start:x}")
-            
-            # Get basic information about the function
-            logger.info("Getting function address ranges")
-            function_info = {
-                'name': func.name,
-                'start': func.address_ranges[0].start,
-                'end': func.address_ranges[0].end,
-            }
-            logger.info(f"Function range: 0x{function_info['start']:x} - 0x{function_info['end']:x}")
-            
-            #logger.info("Getting LLIL representation")
-            #function_info['llil'] = self._get_llil_text(func)
-            #logger.info(f"Found {len(function_info['llil'])} LLIL instructions")
-            
-            #logger.info("Getting MLIL representation")
-            #function_info['mlil'] = self._get_mlil_text(func)
-            #logger.info(f"Found {len(function_info['mlil'])} MLIL instructions")
-            
-            #logger.info("Getting HLIL representation")
-            #function_info['hlil'] = self._get_hlil_text(func)
-            #logger.info(f"Found {len(function_info['hlil'])} HLIL instructions")
-            
-            logger.info("Getting pseudo-C representation")
-            function_info['pseudo_c'] = self._get_pseudo_c_text(self.bv, func)
-            logger.info(f"Found {len(function_info['pseudo_c'])} pseudo-C lines")
-            
-            logger.info("Getting call sites")
-            function_info['call_sites'] = self._get_call_sites(func)
-            logger.info(f"Found {len(function_info['call_sites'])} call sites")
-            
-            logger.info("Getting basic blocks information")
-            function_info['basic_blocks'] = self._get_basic_blocks_info(func)
-            logger.info(f"Found {len(function_info['basic_blocks'])} basic blocks")
-            
-            logger.info("Getting function parameters")
-            function_info['parameters'] = self._get_parameters(func)
-            logger.info(f"Found {len(function_info['parameters'])} parameters")
-            
-            logger.info("Getting function variables")
-            function_info['variables'] = self._get_variables(func)
-            logger.info(f"Found {len(function_info['variables'])} variables")
-            
-            logger.info("Getting function disassembly")
-            function_info['disassembly'] = self._get_disassembly(func)
-            logger.info(f"Found {len(function_info['disassembly'])} disassembly lines")
-            
-            logger.info("Getting incoming calls")
-            function_info['incoming_calls'] = self._get_incoming_calls(func)
-            logger.info(f"Found {len(function_info['incoming_calls'])} incoming calls")
-            
-            logger.info("Successfully gathered all function context")
-            return {
-                'status': 'success',
-                'function': function_info
-            }
-            
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode())
         except Exception as e:
-            logger.error(f"Error getting function context: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
+            self._send_response({'status': 'error', 'message': str(e)}, 400)
+            return
+        
+        if path.startswith('/functions/') and path.endswith('/name'):
+            self._require_auth(self._handle_update_function_name)(data)
+        elif path.startswith('/variables/') and path.endswith('/name'):
+            self._require_auth(self._handle_update_variable_name)(data)
+        else:
+            self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
-    def _handle_basic_block_context_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request for basic block context"""
-        try:
-            address = request.get('address')
-            if address is None:
-                return {'status': 'error', 'message': 'Address is required'}
-            
-            func = self.bv.get_function_at(address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            block = func.get_basic_block_at(address)
-            if block is None:
-                return {'status': 'error', 'message': f'No basic block found at address 0x{address:x}'}
-            
-            block_info = {
-                'start': block.start,
-                'end': block.end,
-                'disassembly': self._get_block_disassembly(block),
-                #'llil': self._get_block_llil(block),
-                #'mlil': self._get_block_mlil(block),
-                'hlil': self._get_block_hlil(block),
-                'incoming_edges': [edge.source.start for edge in block.incoming_edges],
-                'outgoing_edges': [edge.target.start for edge in block.outgoing_edges]
-            }
-            
-            return {
-                'status': 'success',
-                'basic_block': block_info
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting basic block context: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
+    def do_GET(self):
+        """Handle GET requests"""
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
+        if path == '/binary/info':
+            self._require_auth(self._handle_get_binary_info)()
+        elif path == '/functions':
+            self._require_auth(self._handle_get_all_function_names)()
+        elif path.startswith('/functions/'):
+            if path.startswith('/functions/name/'):
+                self._require_auth(self._handle_get_function_context_by_name)()
+            elif path.endswith('/disassembly'):
+                self._require_auth(self._handle_get_function_disassembly)()
+            elif path.endswith('/pseudocode'):
+                self._require_auth(self._handle_get_function_pseudocode)()
+            elif path.endswith('/variables'):
+                self._require_auth(self._handle_get_function_variables)()
+            else:
+                self._require_auth(self._handle_get_function_context)()
+        elif path.startswith('/blocks/'):
+            self._require_auth(self._handle_get_basic_block_context)()
+        else:
+            self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
-    def _handle_update_function_name(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to update a function name"""
-        try:
-            address = request.get('address')
-            new_name = request.get('name')
-            
-            if address is None or new_name is None:
-                return {'status': 'error', 'message': 'Address and name are required'}
-            
-            func = self.bv.get_function_at(address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            old_name = func.name
-            func.name = new_name
-            
-            return {
-                'status': 'success',
-                'message': f'Function name updated from "{old_name}" to "{new_name}"'
-            }
-            
-        except Exception as e:
-            logger.error(f"Error updating function name: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
+    def _handle_auth(self, data):
+        """Handle authentication requests"""
+        username = data.get('username')
+        password = data.get('password')
+        token = data.get('token')
+        
+        if token:
+            is_valid, client_info = self.protocol.auth_manager.validate_token(token)
+            if is_valid:
+                self._send_response({
+                    'status': 'success',
+                    'message': 'Authentication successful',
+                    'token': token
+                })
+                return
+        
+        if username and password:
+            if self.protocol.auth_manager.verify_credentials(username, password):
+                client_info = {'username': username, 'address': self.client_address[0]}
+                new_token = self.protocol.auth_manager.generate_token(client_info)
+                self._send_response({
+                    'status': 'success',
+                    'message': 'Authentication successful',
+                    'token': new_token
+                })
+                return
+        
+        self._send_response({'status': 'error', 'message': 'Authentication failed'}, 401)
     
-    def _handle_update_variable_name(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to update a variable name"""
-        try:
-            function_address = request.get('function_address')
-            var_id = request.get('variable_id')
-            new_name = request.get('name')
-            
-            if function_address is None or var_id is None or new_name is None:
-                return {'status': 'error', 'message': 'Function address, variable ID, and name are required'}
-            
-            func = self.bv.get_function_at(function_address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{function_address:x}'}
-            
-            # Find the variable by ID
-            for var in func.vars:
-                if var.identifier == var_id:
-                    old_name = var.name
-                    func.create_user_var(var.source_type, var.storage, var.index, var.type, new_name)
-                    return {
-                        'status': 'success',
-                        'message': f'Variable name updated from "{old_name}" to "{new_name}"'
-                    }
-            
-            return {'status': 'error', 'message': f'No variable with ID {var_id} found in function'}
-            
-        except Exception as e:
-            logger.error(f"Error updating variable name: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
-    
-    def _handle_add_comment(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to add a comment"""
-        try:
-            address = request.get('address')
-            comment = request.get('comment')
-            
-            if address is None or comment is None:
-                return {'status': 'error', 'message': 'Address and comment are required'}
-            
-            self.bv.set_comment_at(address, comment)
-            
-            return {
-                'status': 'success',
-                'message': f'Comment added at address 0x{address:x}'
-            }
-            
-        except Exception as e:
-            logger.error(f"Error adding comment: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
-    
-    def _handle_get_binary_info(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get information about the binary"""
+    def _handle_get_binary_info(self):
+        """Handle requests for binary information"""
         try:
             binary_info = {
-                'filename': self.bv.file.filename,
-                'file_size': self.bv.end,
-                'start': self.bv.start,
-                'end': self.bv.end,
-                'entry_point': self.bv.entry_point,
-                'arch': self.bv.arch.name,
-                'platform': self.bv.platform.name,
-                'segments': self._get_segments_info(),
-                'sections': self._get_sections_info(),
-                'functions_count': len(self.bv.functions),
-                'symbols_count': len(self.bv.symbols)
+                'filename': self.protocol.bv.file.filename,
+                'file_size': self.protocol.bv.end,
+                'start': self.protocol.bv.start,
+                'end': self.protocol.bv.end,
+                'entry_point': self.protocol.bv.entry_point,
+                'arch': self.protocol.bv.arch.name,
+                'platform': self.protocol.bv.platform.name,
+                'segments': self.protocol._get_segments_info(),
+                'sections': self.protocol._get_sections_info(),
+                'functions_count': len(self.protocol.bv.functions),
+                'symbols_count': len(self.protocol.bv.symbols)
             }
             
-            return {
+            self._send_response({
                 'status': 'success',
                 'binary_info': binary_info
-            }
+            })
             
         except Exception as e:
             logger.error(f"Error getting binary info: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+
+    def _get_function_context(self, address: int) -> Dict[str, Any]:
+        res = self.protocol.bv.get_functions_containing(address)
+        func = None
+        if len(res) > 0:
+            func = res[0]
+        else:
+            return None
+        
+        function_info = {
+            'name': func.name,
+            'start': func.address_ranges[0].start,
+            'end': func.address_ranges[0].end,
+            'pseudo_c': self._get_pseudo_c_text(self.protocol.bv, func),
+            'call_sites': self._get_call_sites(func),
+            'basic_blocks': self._get_basic_blocks_info(func),
+            'parameters': self._get_parameters(func),
+            'variables': self._get_variables(func),
+            'disassembly': self._get_disassembly(func),
+            'incoming_calls': self._get_incoming_calls(func)
+        }
+        return function_info
+
+    def _handle_get_function_context(self, address: int):
+        """Handle requests for function context"""
+        try:
+            function_info = self._get_function_context(address)
+            if function_info is None:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            
+            self._send_response({
+                'status': 'success',
+                'function': function_info
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting function context: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_get_function_context_by_name(self):
+        """Handle requests for function context by name"""
+        try:
+            name = self.path.split('/')[-1]
+            res = self.protocol.bv.get_functions_by_name(name)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
+                self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
+                return
+            
+            function_info = self._get_function_context(func.start)
+            if function_info is None:
+                self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
+                return
+            self._send_response({
+                'status': 'success',
+                'function': function_info
+            })
+        except Exception as e:
+            logger.error(f"Error getting function context by name: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_get_all_function_names(self):
+        """Handle requests for all function names"""
+        try:
+            function_names = [func.name for func in self.protocol.bv.functions]
+            self._send_response({
+                'status': 'success',
+                'function_names': function_names
+            })
+        except Exception as e:
+            logger.error(f"Error getting all function names: {e}")
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_update_function_name(self, data):
+        """Handle requests to update function name"""
+        try:
+            if not data or 'name' not in data:
+                self._send_response({'status': 'error', 'message': 'New name is required'}, 400)
+                return
+            
+            new_name = data['name']
+            address = int(self.path.split('/')[-2], 0)
+            res = self.protocol.bv.get_functions_containing(address)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            
+            old_name = func.name
+            func.name = new_name
+            
+            self._send_response({
+                'status': 'success',
+                'message': f'Function name updated from "{old_name}" to "{new_name}"'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error updating function name: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+
+    def _handle_update_variable_name(self, data):
+        """Handle requests to update variable name"""
+        try:
+            if not data or 'name' not in data:
+                self._send_response({'status': 'error', 'message': 'New name is required'}, 400)
+                return
+            
+            new_name = data['name']
+            address = int(self.path.split('/')[-3], 0)
+            res = self.protocol.bv.get_functions_containing(address)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            # Find the variable by ID
+            for var in func.vars:
+                if var.identifier == int(self.path.split('/')[-2]):
+                    old_name = var.name
+                    func.create_user_var(var, var.type, new_name)
+                    self._send_response({
+                        'status': 'success',
+                        'message': f'Variable name updated from "{old_name}" to "{new_name}"'
+                    })
+                    return
+            
+            self._send_response({'status': 'error', 'message': f'No variable with ID {self.path.split("/")[-1]} found in function'}, 404)
+            
+        except Exception as e:
+            logger.error(f"Error updating variable name: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_add_comment(self, data):
+        """Handle requests to add a comment"""
+        try:
+            if not data or 'comment' not in data:
+                self._send_response({'status': 'error', 'message': 'Comment text is required'}, 400)
+                return
+            
+            comment = data['comment']
+            self.protocol.bv.set_comment_at(int(self.path.split('/')[-1], 0), comment)
+            
+            self._send_response({
+                'status': 'success',
+                'message': f'Comment added at address 0x{int(self.path.split("/")[-1], 0):x}'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error adding comment: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_get_function_disassembly(self):
+        """Handle requests for function disassembly"""
+        try:
+            print(self.path)
+            address = int(self.path.split('/')[-2], 0)
+            func = self.protocol.bv.get_function_at(address)
+            if func is None:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            
+            disassembly = self._get_disassembly(func)
+            
+            self._send_response({
+                'status': 'success',
+                'disassembly': disassembly
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting function disassembly: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_get_function_pseudocode(self):
+        """Handle requests for function pseudocode"""
+        try:
+            address = int(self.path.split('/')[-2], 0)
+            res = self.protocol.bv.get_functions_containing(address)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            
+            pseudocode = self._get_pseudo_c_text(self.protocol.bv, func)
+            
+            self._send_response({
+                'status': 'success',
+                'pseudocode': pseudocode
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting function pseudocode: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+    
+    def _handle_get_function_variables(self):
+        """Handle requests for function variables"""
+        try:
+            address = int(self.path.split('/')[-2], 0)
+            res = self.protocol.bv.get_functions_containing(address)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
+                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                return
+            
+            variables = {
+                'parameters': self._get_parameters(func),
+                'local_variables': self._get_variables(func)
+            }
+            
+            self._send_response({
+                'status': 'success',
+                'variables': variables
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting function variables: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _get_llil_text(self, func) -> List[str]:
         """Get LLIL text for a function"""
@@ -698,7 +562,7 @@ class BinjaLattice:
                 lr = re.findall("(^[0-9A-Fa-f]+)(.*)$", l)
                 if lr:
                     # Converting binja address format of 0x[Address]
-                    addr = int("0x" + lr[0][0], 16)
+                    addr = int("0x" + lr[0][0], 0)
                     pseudo_c = lr[0][1]
                     result.append(f"0x{addr}: {pseudo_c}")
             return result
@@ -707,7 +571,7 @@ class BinjaLattice:
         """Get call sites within a function"""
         result = []
         for ref in func.call_sites:
-            called_func = self.bv.get_function_at(ref.address)
+            called_func = self.protocol.bv.get_function_at(ref.address)
             called_name = called_func.name if called_func else "unknown"
             result.append({
                 'address': ref.address,
@@ -761,18 +625,15 @@ class BinjaLattice:
                 else:
                     instr_len = all_dis[i+1].address-all_dis[i].address
                 result.append({
-                    'address': instruction.address,
-                    'text': str(instruction),
-                    'bytes': [str(hex(b)) for b in self.bv.read(instruction.address, instr_len)],
-                    'length': instr_len
+                    f"0x{instruction.address:x}:\t{str(instruction)}"
                 })
         return result
     
     def _get_incoming_calls(self, func) -> List[Dict[str, Any]]:
         """Get incoming calls to a function"""
         result = []
-        for ref in self.bv.get_code_refs(func.start):
-            caller = self.bv.get_function_at(ref.address)
+        for ref in self.protocol.bv.get_code_refs(func.start):
+            caller = self.protocol.bv.get_function_at(ref.address)
             if caller:
                 result.append({
                     'address': ref.address,
@@ -821,6 +682,103 @@ class BinjaLattice:
             for instruction in hlil_block:
                 result.append(f"0x{instruction.address:x}: {instruction}")
         return result
+
+class BinjaLattice:
+    """
+    Protocol for communicating between Binary Ninja an external MCP Server or tools.
+    This protocol handles sending context from Binary Ninja to MCP Server and receiving
+    responses to integrate back into the Binary Ninja UI.
+    """
+    
+    def __init__(self, bv: BinaryView, port: int = 9000, host: str = "localhost", use_ssl: bool = False):
+        """
+        Initialize the model context protocol.
+        
+        Args:
+            bv: BinaryView object representing the currently analyzed binary
+            port: Port number for communication
+            host: Host address for the server
+            use_ssl: Whether to use SSL/TLS encryption
+        """
+        self.bv = bv
+        self.port = port
+        self.host = host
+        self.use_ssl = use_ssl
+        self.auth_manager = AuthManager()
+        self.server = None
+    
+    def start_server(self):
+        """Start the HTTP server"""
+        try:
+            if self.use_ssl:
+                logger.info("Starting server with SSL")
+                cert_file = os.path.join(os.path.dirname(__file__), "server.crt")
+                key_file = os.path.join(os.path.dirname(__file__), "server.key")
+                
+                if not (os.path.exists(cert_file) and os.path.exists(key_file)):
+                    self._generate_self_signed_cert(cert_file, key_file)
+                
+                self.server = HTTPServer((self.host, self.port), 
+                    lambda *args, **kwargs: LatticeRequestHandler(*args, protocol=self, **kwargs))
+                self.server.socket = ssl.wrap_socket(self.server.socket,
+                    server_side=True,
+                    certfile=cert_file,
+                    keyfile=key_file)
+            else:
+                self.server = HTTPServer((self.host, self.port),
+                    lambda *args, **kwargs: LatticeRequestHandler(*args, protocol=self, **kwargs))
+            
+            # Run server in a separate thread
+            server_thread = threading.Thread(target=self.server.serve_forever)
+            server_thread.daemon = True
+            server_thread.start()
+            
+            logger.info(f"Server started on {self.host}:{self.port}")
+            logger.info(f"Authentication API key: {self.auth_manager.api_key}")
+            logger.info(f"Use this key to authenticate clients")
+            
+        except Exception as e:
+            logger.error(f"Failed to start server: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self.stop_server()
+    
+    def _generate_self_signed_cert(self, cert_file, key_file):
+        """Generate self-signed certificate for development purposes"""
+        from OpenSSL import crypto
+        
+        # Create a key pair
+        k = crypto.PKey()
+        k.generate_key(crypto.TYPE_RSA, 2048)
+        
+        # Create a self-signed cert
+        cert = crypto.X509()
+        cert.get_subject().C = "US"
+        cert.get_subject().ST = "State"
+        cert.get_subject().L = "Locality"
+        cert.get_subject().O = "BinjaLattice"
+        cert.get_subject().OU = "BinjaLattice Server"
+        cert.get_subject().CN = self.host
+        cert.set_serial_number(1000)
+        cert.gmtime_adj_notBefore(0)
+        cert.gmtime_adj_notAfter(365*24*60*60)
+        cert.set_issuer(cert.get_subject())
+        cert.set_pubkey(k)
+        cert.sign(k, 'sha256')
+        
+        # Write to disk
+        with open(cert_file, "wb") as f:
+            f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+        with open(key_file, "wb") as f:
+            f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+        
+        logger.info(f"Self-signed certificate generated at {cert_file}")
+    
+    def stop_server(self):
+        """Stop the server"""
+        if self.server:
+            self.server.shutdown()
+            self.server.server_close()
+            logger.info("Server stopped")
     
     def _get_segments_info(self) -> List[Dict[str, Any]]:
         """Get information about binary segments"""
@@ -850,99 +808,6 @@ class BinjaLattice:
                 'semantics': str(section.semantics)
             })
         return result
-    
-    def _handle_get_function_disassembly(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get function disassembly"""
-        try:
-            address = request.get('address')
-            if address is None:
-                return {'status': 'error', 'message': 'Address is required'}
-            
-            func = self.bv.get_function_at(address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            disassembly = self._get_disassembly(func)
-            
-            return {
-                'status': 'success',
-                'disassembly': disassembly
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting function disassembly: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
-    
-    def _handle_get_function_pseudocode(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get function pseudocode"""
-        try:
-            address = request.get('address')
-            if address is None:
-                return {'status': 'error', 'message': 'Address is required'}
-            
-            func = self.bv.get_function_at(address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            pseudocode = self._get_pseudo_c_text(self.bv, func)
-            
-            return {
-                'status': 'success',
-                'pseudocode': pseudocode
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting function pseudocode: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
-    
-    def _handle_get_function_variables(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle a request to get function variables"""
-        try:
-            address = request.get('address')
-            if address is None:
-                return {'status': 'error', 'message': 'Address is required'}
-            
-            func = self.bv.get_function_at(address)
-            if func is None:
-                return {'status': 'error', 'message': f'No function found at address 0x{address:x}'}
-            
-            # Get both parameters and local variables
-            variables = {
-                'parameters': self._get_parameters(func),
-                'local_variables': self._get_variables(func)
-            }
-            
-            return {
-                'status': 'success',
-                'variables': variables
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting function variables: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
-            return {'status': 'error', 'message': str(e), 'stack_trace': traceback.format_exc()}
-    
-    def stop_server(self):
-        """Stop the server and close all connections"""
-        self.running = False
-        
-        # Close all client connections
-        for client_socket, _ in self.clients:
-            try:
-                client_socket.close()
-            except:
-                pass
-        
-        # Close server socket
-        if self.server_socket:
-            try:
-                self.server_socket.close()
-            except:
-                pass
-            
-        logger.info("Server stopped")
 
 # Example usage as a plugin
 def register_plugin_command(view):
