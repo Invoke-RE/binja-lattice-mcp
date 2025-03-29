@@ -214,9 +214,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             elif path.endswith('/variables'):
                 self._require_auth(self._handle_get_function_variables)()
             else:
-                self._require_auth(self._handle_get_function_context)()
-        elif path.startswith('/blocks/'):
-            self._require_auth(self._handle_get_basic_block_context)()
+                self._require_auth(self._handle_get_function_context_by_address)()
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
@@ -298,9 +296,10 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         }
         return function_info
 
-    def _handle_get_function_context(self, address: int):
+    def _handle_get_function_context_by_address(self):
         """Handle requests for function context"""
         try:
+            address = int(self.path.split('/')[-1], 0)
             function_info = self._get_function_context(address)
             if function_info is None:
                 self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
@@ -440,10 +439,12 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_function_disassembly(self):
         """Handle requests for function disassembly"""
         try:
-            print(self.path)
             address = int(self.path.split('/')[-2], 0)
-            func = self.protocol.bv.get_function_at(address)
-            if func is None:
+            res = self.protocol.bv.get_functions_containing(address)
+            func = None
+            if len(res) > 0:
+                func = res[0]
+            else:
                 self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
                 return
             
@@ -515,7 +516,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         result = []
         for block in func.llil:
             for instruction in block:
-                result.append(f"0x{instruction.address:x}: {instruction}")
+                result.append({'address': instruction.address, 'text': str(instruction)})
         return result
     
     def _get_mlil_text(self, func) -> List[str]:
@@ -523,7 +524,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         result = []
         for block in func.mlil:
             for instruction in block:
-                result.append(f"0x{instruction.address:x}: {instruction}")
+                result.append({'address': instruction.address, 'text': str(instruction)})
         return result
     
     def _get_hlil_text(self, func) -> List[str]:
@@ -531,7 +532,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         result = []
         for block in func.hlil:
             for instruction in block:
-                result.append(f"0x{instruction.address:x}: {instruction}")
+                result.append({'address': instruction.address, 'text': str(instruction)})
         return result
 
     def _get_pseudo_c_text(self, bv: BinaryView, function: Function) -> List[str]:
@@ -564,7 +565,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                     # Converting binja address format of 0x[Address]
                     addr = int("0x" + lr[0][0], 0)
                     pseudo_c = lr[0][1]
-                    result.append(f"0x{addr}: {pseudo_c}")
+                    result.append({'address': addr, 'text': pseudo_c})
             return result
     
     def _get_call_sites(self, func) -> List[Dict[str, Any]]:
@@ -625,7 +626,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 else:
                     instr_len = all_dis[i+1].address-all_dis[i].address
                 result.append({
-                    f"0x{instruction.address:x}:\t{str(instruction)}"
+                    'address': instruction.address,
+                    'text': str(instruction)
                 })
         return result
     
@@ -752,8 +754,8 @@ class BinjaLattice:
         
         # Create a self-signed cert
         cert = crypto.X509()
-        cert.get_subject().C = "US"
-        cert.get_subject().ST = "State"
+        cert.get_subject().C = "Canada"
+        cert.get_subject().ST = "Province"
         cert.get_subject().L = "Locality"
         cert.get_subject().O = "BinjaLattice"
         cert.get_subject().OU = "BinjaLattice Server"
