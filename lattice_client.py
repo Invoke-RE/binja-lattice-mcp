@@ -268,6 +268,19 @@ class LatticeClient:
         except Exception as e:
             logger.error(f"Error getting function disassembly: {e}")
             return None
+        
+    def get_cross_references_to_address(self, address: int) -> Optional[Dict[str, Any]]:
+        """
+        Get cross references to an address
+        """
+        try:
+            response = self.session.get(urljoin(self.base_url, f'/cross-references/{address}'))
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            logger.error(f"Error getting cross references to address: {e}")
+            return None
 
     def get_function_pseudocode(self, address: int) -> Optional[Dict[str, Any]]:
         """
@@ -326,7 +339,8 @@ def print_menu():
     print("9. Get Function Disassembly")
     print("10. Get Function Pseudocode")
     print("11. Get Function Variables")
-    print("12. Exit")
+    print("12. Get Cross References to Address")
+    print("13. Exit")
     print()
 
 def interactive_mode(client: LatticeClient):
@@ -334,7 +348,7 @@ def interactive_mode(client: LatticeClient):
     while True:
         print_menu()
         try:
-            choice = input("Enter your choice (1-12): ").strip()
+            choice = input("Enter your choice (1-13): ").strip()
             
             if choice == '1':
                 result = client.get_binary_info()
@@ -424,6 +438,14 @@ def interactive_mode(client: LatticeClient):
                 except ValueError:
                     print("Invalid address format")
             elif choice == '12':
+                addr = input("Enter address (hex or decimal): ").strip()
+                try:
+                    address = int(addr, 0)
+                    result = client.get_cross_references_to_address(address)
+                    print(json.dumps(result, indent=2))
+                except ValueError:
+                    print("Invalid address format")
+            elif choice == '13':
                 print("Goodbye!")
                 break
             else:
@@ -460,6 +482,7 @@ def main():
     command_group.add_argument('--get-function-disassembly', type=lambda x: int(x, 0), help='Get function disassembly at address (hex or decimal)')
     command_group.add_argument('--get-function-pseudocode', type=lambda x: int(x, 0), help='Get function pseudocode at address (hex or decimal)')
     command_group.add_argument('--get-function-variables', type=lambda x: int(x, 0), help='Get function variables at address (hex or decimal)')
+    command_group.add_argument('--get-cross-references-to-address', type=lambda x: int(x, 0), help='Get cross references to address (hex or decimal)')
     
     args = parser.parse_args()
     
@@ -524,7 +547,10 @@ def main():
             elif args.get_function_variables:
                 result = client.get_function_variables(args.get_function_variables)
                 print(json.dumps(result, indent=2))
-                
+
+            elif args.get_cross_references_to_address:
+                result = client.get_cross_references_to_address(args.get_cross_references_to_address)
+                print(json.dumps(result, indent=2))
             else:
                 print("No command specified. Use --help to see available commands.")
                 

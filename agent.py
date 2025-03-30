@@ -14,16 +14,16 @@ from typing import Optional, Dict, Any, List, Tuple
 import re
 import traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 import threading
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AuthManager:
     """Manages authentication for the Lattice Protocol"""
-    """Should we fix this 3600 by default? What if the analysis takes longer than 1 hour?"""
-    def __init__(self, token_expiry_seconds=3600):
+    def __init__(self, token_expiry_seconds=7200):
         """
         Initialize the authentication manager
         
@@ -35,7 +35,7 @@ class AuthManager:
         
         # Generate a secure API key on startup
         self.api_key = secrets.token_hex(16)
-        logger.info(f"Generated API key: {self.api_key}")
+        logger.info(f"API key: {self.api_key}")
     
     def generate_token(self, client_info: Dict[str, Any]) -> str:
         """
@@ -105,14 +105,14 @@ class AuthManager:
         for token in expired_tokens:
             del self.tokens[token]
     
-    def verify_credentials(self, username: str, password: str) -> bool:
+    def verify_credentials(self, password: str) -> bool:
         """
         Verify a username and password against stored credentials.
         For simplicity, this just verifies against the API key.
         In a real implementation, this would check against a secure credential store.
         
         Args:
-            username: The username to verify
+            username: The username to tie to session token
             password: The password to verify
             
         Returns:
@@ -215,6 +215,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 self._require_auth(self._handle_get_function_variables)()
             else:
                 self._require_auth(self._handle_get_function_context_by_address)()
+        elif path.startswith('/cross-references/'):
+            self._require_auth(self._handle_get_cross_references_to_address)()
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
@@ -234,8 +236,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 })
                 return
         
-        if username and password:
-            if self.protocol.auth_manager.verify_credentials(username, password):
+        if password:
+            if self.protocol.auth_manager.verify_credentials(password):
                 client_info = {'username': username, 'address': self.client_address[0]}
                 new_token = self.protocol.auth_manager.generate_token(client_info)
                 self._send_response({
@@ -510,6 +512,20 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.error(f"Error getting function variables: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
+
+    def _handle_get_cross_references_to_address(self):
+        """Handle requests for cross references to an address"""
+        try:
+            address = int(self.path.split('/')[-1], 0)
+            cross_references = self._get_cross_references_to_address(address)
+            self._send_response({
+                'status': 'success',
+                'cross_references': cross_references
+            })
+        except Exception as e:
+            logger.error(f"Error getting cross references to address: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _get_llil_text(self, func) -> List[str]:
         """Get LLIL text for a function"""
@@ -580,6 +596,15 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
         return result
     
+    def _get_cross_references_to_address(self, address: int) -> List[Dict[str, Any]]:
+        """Get cross references to an address"""
+        result = []
+        for ref in self.protocol.bv.get_code_refs(address):
+            result.append({
+                'address': ref.address
+            })
+        return result
+
     def _get_basic_blocks_info(self, func) -> List[Dict[str, Any]]:
         """Get information about basic blocks in a function"""
         result = []
