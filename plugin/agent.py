@@ -237,6 +237,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 return
         
         if password:
+            print(f"Verifying credentials for {username} with password {password}")
             if self.protocol.auth_manager.verify_credentials(password):
                 client_info = {'username': username, 'address': self.client_address[0]}
                 new_token = self.protocol.auth_manager.generate_token(client_info)
@@ -518,6 +519,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         try:
             address = int(self.path.split('/')[-1], 0)
             cross_references = self._get_cross_references_to_address(address)
+            if len(cross_references) == 0:
+                self._send_response({'status': 'error', 'message': f'No cross references found for address 0x{address:x}'}, 404)
             self._send_response({
                 'status': 'success',
                 'cross_references': cross_references
