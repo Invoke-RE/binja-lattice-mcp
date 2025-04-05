@@ -171,7 +171,9 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         if path == '/auth':
             self._handle_auth(data)
         elif path.startswith('/comments/'):
-            self._require_auth(self._handle_add_comment)(data)
+            self._require_auth(self._handle_add_comment_to_address)(data)
+        elif path.startswith('/functions/'):
+            self._require_auth(self._handle_add_comment_to_function)(data)
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
@@ -414,8 +416,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
-    def _handle_add_comment(self, data):
-        """Handle requests to add a comment"""
+    def _handle_add_comment_to_address(self, data):
+        """Handle requests to add a comment to an address"""
         try:
             if not data or 'comment' not in data:
                 self._send_response({'status': 'error', 'message': 'Comment text is required'}, 400)
@@ -434,6 +436,30 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
+    def _handle_add_comment_to_function(self, data):
+        """Handle requests to add a comment to a function"""
+        try:
+            if not data or 'comment' not in data:
+                self._send_response({'status': 'error', 'message': 'Comment text is required'}, 400)
+                return
+            
+            comment = data['comment']
+            name = self.path.split('/')[-1]
+            func = self._get_function_by_name(name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
+                return
+            self.protocol.bv.set_comment_at(func.start, comment)
+            
+            self._send_response({
+                'status': 'success',
+                'message': f'Comment added to function {name}'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error adding comment: {e}")
+            logger.error("Stack trace: %s", traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _get_function_by_name(self, name):
         """Acquire function by name instead of address"""
@@ -850,25 +876,3 @@ PluginCommand.register(
     "Start server for Binary Ninja Lattice protocol with authentication",
     register_plugin_command
 )
-
-# Example of client usage (see lattice_client.py for client implementation)
-"""
-from lattice_client import LatticeClient
-
-# Connect to a BinjaLattice server
-client = LatticeClient(host="localhost", port=9000, use_ssl=True)
-if client.connect():
-    # Authenticate with username and password (API key)
-    if client.authenticate("user", "generated_api_key_from_server_logs"):
-        # Now make requests
-        binary_info = client.get_binary_info()
-        print(f"Binary: {binary_info.get('binary_info', {}).get('filename')}")
-        
-        # Get function context at address 0x1000
-        function_context = client.get_function_context(0x1000)
-        if function_context.get('status') == 'success':
-            print(f"Function name: {function_context.get('function', {}).get('name')}")
-    
-    # Close the connection when done
-    client.close()
-"""

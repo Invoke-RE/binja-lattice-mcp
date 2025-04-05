@@ -147,7 +147,8 @@ def main():
     command_group.add_argument('--get-basic-block-context', type=lambda x: int(x, 0), help='Get basic block context at address (hex or decimal)')
     command_group.add_argument('--update-function-name', nargs=2, help='Update function name: <address> <new_name>')
     command_group.add_argument('--update-variable-name', nargs=3, help='Update variable name: <function_address> <var_id> <new_name>')
-    command_group.add_argument('--add-comment', nargs=2, help='Add comment: <address> <comment>')
+    command_group.add_argument('--add-comment-to-address', nargs=2, help='Add comment to address: <address> <comment>')
+    command_group.add_argument('--add-comment-to-function', nargs=2, help='Add comment to function: <function_name> <comment>')
     command_group.add_argument('--get-function-disassembly', type=lambda x: int(x, 0), help='Get function disassembly at address (hex or decimal)')
     command_group.add_argument('--get-function-pseudocode', type=lambda x: int(x, 0), help='Get function pseudocode at address (hex or decimal)')
     command_group.add_argument('--get-function-variables', type=lambda x: int(x, 0), help='Get function variables at address (hex or decimal)')
@@ -199,12 +200,18 @@ def main():
                 result = client.update_variable_name(func_addr, var_id, new_name)
                 print(json.dumps(result, indent=2))
                 
-            elif args.add_comment:
-                address = int(args.add_comment[0], 0)
-                comment = args.add_comment[1]
-                result = client.add_comment(address, comment)
+            elif args.add_comment_to_address:
+                address = int(args.add_comment_to_address[0], 0)
+                comment = args.add_comment_to_address[1]
+                result = client.add_comment_to_address(address, comment)
                 print(json.dumps(result, indent=2))
-                
+
+            elif args.add_comment_to_function:
+                name = args.add_comment_to_function[0]
+                comment = args.add_comment_to_function[1]
+                result = client.add_comment_to_function(name, comment)
+
+                print(json.dumps(result, indent=2))
             elif args.get_function_disassembly:
                 result = client.get_function_disassembly(args.get_function_disassembly)
                 print(json.dumps(result, indent=2))

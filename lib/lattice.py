@@ -224,7 +224,7 @@ class Lattice:
             logger.error(f"Error updating variable name: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def add_comment(self, address: int, comment: str) -> Optional[Dict[str, Any]]:
+    def add_comment_to_address(self, address: int, comment: str) -> Optional[Dict[str, Any]]:
         """
         Add a comment at the specified address
         
@@ -245,6 +245,22 @@ class Lattice:
             return {'status': 'error', 'message': 'Failed to add comment'}
         except Exception as e:
             logger.error(f"Error adding comment: {e}")
+            return {'status': 'error', 'message': str(e)}
+
+    def add_comment_to_function(self, name: str, comment: str) -> Optional[Dict[str, Any]]:
+        """
+        Add a comment to a function with specified function name
+        """
+        try:
+            response = self.session.post(
+                urljoin(self.base_url, f'/functions/{name}/comments'),
+                json={'comment': comment}
+            )
+            if response.status_code == 200:
+                return response.json()
+            return {'status': 'error', 'message': 'Failed to add comment'}  
+        except Exception as e:
+            logger.error(f"Error adding comment to function: {e}")
             return {'status': 'error', 'message': str(e)}
     
     def get_function_disassembly(self, name: str) -> Optional[Dict[str, Any]]:

@@ -30,9 +30,17 @@ def update_function_name(name: str, new_name: str) -> str:
     return f"Error: Could not update function name {name}"
 
 @mcp.tool()
-def add_comment(name: str, comment: str) -> str:
-    """Add a comment to a function"""
-    response = lattice_client.add_comment(name, comment)
+def add_comment_to_address(address: int, comment: str) -> str:
+    """Add a comment to an address"""
+    response = lattice_client.add_comment_to_address(address, comment)
+    if response and 'status' in response and response['status'] == 'success':
+        return f"Successfully added comment to address {address}"
+    return f"Error: Could not add comment to address {address}"
+
+@mcp.tool()
+def add_comment_to_function(name: str, comment: str) -> str:
+    """Add a comment to a function with specified function name"""
+    response = lattice_client.add_comment_to_function(name, comment)
     if response and 'status' in response and response['status'] == 'success':
         return f"Successfully added comment to function {name}"
     return f"Error: Could not add comment to function {name}"
@@ -67,7 +75,7 @@ def get_cross_references_to_function(name: str) -> str:
     response = lattice_client.get_cross_references_to_function(name)
     if response and 'status' in response and response['status'] == 'success':
         return '\n'.join([f"{ref['address']}" for ref in response['cross_references']])
-    return f"Error: Could not retrieve cross references for address {hex(address)}"
+    return f"Error: Could not retrieve cross references for function {name}"
 
 # Initialize and run the server
 api_key = os.getenv("BNJLAT")
