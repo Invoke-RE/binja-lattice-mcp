@@ -9,14 +9,15 @@ def print_menu():
     print("3. Get Function Context by Name")
     print("4. Update Function Name")
     print("5. Update Variable Name")
-    print("6. Add Comment")
-    print("7. Reconnect to Server")
-    print("8. Get All Function Names")
-    print("9. Get Function Disassembly")
-    print("10. Get Function Pseudocode")
-    print("11. Get Function Variables")
-    print("12. Get Cross References to Address")
-    print("13. Exit")
+    print("6. Add Comment to Function")
+    print("7. Add Comment to Address")
+    print("8. Reconnect to Server")
+    print("9. Get All Function Names")
+    print("10. Get Function Disassembly")
+    print("11. Get Function Pseudocode")
+    print("12. Get Function Variables")
+    print("13. Get Cross References to Function")
+    print("14. Exit")
     print()
 
 def interactive_mode(client: Lattice):
@@ -24,7 +25,7 @@ def interactive_mode(client: Lattice):
     while True:
         print_menu()
         try:
-            choice = input("Enter your choice (1-13): ").strip()
+            choice = input("Enter your choice (1-14): ").strip()
             
             if choice == '1':
                 result = client.get_binary_info()
@@ -66,16 +67,22 @@ def interactive_mode(client: Lattice):
                     print("Invalid input format")
                     
             elif choice == '6':
-                addr = input("Enter address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 comment = input("Enter comment: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.add_comment(address, comment)
+                    result = client.add_comment_to_function(name, comment)
+                    print(json.dumps(result, indent=2))
+                except ValueError:
+                    print("Invalid function name")
+            elif choice == '7':
+                address = input("Enter address (hex or decimal): ").strip()
+                comment = input("Enter comment: ").strip()
+                try:
+                    result = client.add_comment_to_address(address, comment)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid address format")
-                    
-            elif choice == '7':
+            elif choice == '8':
                 client.close()
                 if client.connect():
                     print("Reconnected successfully")
@@ -83,38 +90,38 @@ def interactive_mode(client: Lattice):
                         print("Previous authentication token is still valid")
                 else:
                     print("Failed to reconnect")
-            elif choice == '8':
+            elif choice == '9':
                 result = client.get_all_function_names()
                 print(json.dumps(result, indent=2))
-            elif choice == '9':
+            elif choice == '10':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_disassembly(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid function name")
-            elif choice == '10':
+            elif choice == '11':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_pseudocode(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid function name")
-            elif choice == '11':
+            elif choice == '12':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_variables(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid function name")
-            elif choice == '12':
+            elif choice == '13':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_cross_references_to_function(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid function name")
-            elif choice == '13':
+            elif choice == '14':
                 print("Goodbye!")
                 break
             else:
@@ -125,7 +132,7 @@ def interactive_mode(client: Lattice):
             break
         except Exception as e:
             print(f"Error: {e}")
-            print("Try reconnecting to the server (option 7)")
+            print("Try reconnecting to the server (option 8)")
 
 def main():
     parser = argparse.ArgumentParser(description='BinjaLattice Client - Communicate with Binary Ninja Lattice Protocol Server')
@@ -152,8 +159,7 @@ def main():
     command_group.add_argument('--get-function-disassembly', type=lambda x: int(x, 0), help='Get function disassembly at address (hex or decimal)')
     command_group.add_argument('--get-function-pseudocode', type=lambda x: int(x, 0), help='Get function pseudocode at address (hex or decimal)')
     command_group.add_argument('--get-function-variables', type=lambda x: int(x, 0), help='Get function variables at address (hex or decimal)')
-    command_group.add_argument('--get-cross-references-to-address', type=lambda x: int(x, 0), help='Get cross references to address (hex or decimal)')
-    
+    command_group.add_argument('--get-cross-references-to-function', type=lambda x: int(x, 0), help='Get cross references to function name')
     args = parser.parse_args()
     
     # Create client
@@ -224,8 +230,8 @@ def main():
                 result = client.get_function_variables(args.get_function_variables)
                 print(json.dumps(result, indent=2))
 
-            elif args.get_cross_references_to_address:
-                result = client.get_cross_references_to_address(args.get_cross_references_to_address)
+            elif args.get_cross_references_to_function:
+                result = client.get_cross_references_to_function(args.get_cross_references_to_function)
                 print(json.dumps(result, indent=2))
             else:
                 print("No command specified. Use --help to see available commands.")

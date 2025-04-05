@@ -173,6 +173,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         elif path.startswith('/comments/'):
             self._require_auth(self._handle_add_comment_to_address)(data)
         elif path.startswith('/functions/'):
+            logger.info(f"Handling add comment to function request: {data}")
             self._require_auth(self._handle_add_comment_to_function)(data)
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
@@ -368,7 +369,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             name = self.path.split('/')[-2]
             func = self._get_function_by_name(name)
             if not func:
-                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+                self._send_response({'status': 'error', 'message': f'No function found with name {name}'}, 404)
                 return
             
             old_name = func.name
@@ -444,7 +445,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 return
             
             comment = data['comment']
-            name = self.path.split('/')[-1]
+            name = self.path.split('/')[-2]
             func = self._get_function_by_name(name)
             if not func:
                 self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
