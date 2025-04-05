@@ -47,23 +47,20 @@ def interactive_mode(client: Lattice):
                     print("Invalid function name")
                     
             elif choice == '4':
-                addr = input("Enter function address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 new_name = input("Enter new function name: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.update_function_name(address, new_name)
+                    result = client.update_function_name(name, new_name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    print("Invalid function name")
                     
             elif choice == '5':
-                func_addr = input("Enter function address (hex or decimal): ").strip()
-                var_id = input("Enter variable ID: ").strip()
+                func_name = input("Enter function name: ").strip()
+                var_name = input("Enter variable name: ").strip()
                 new_name = input("Enter new variable name: ").strip()
                 try:
-                    address = int(func_addr, 0)
-                    var_id = int(var_id)
-                    result = client.update_variable_name(address, var_id, new_name)
+                    result = client.update_variable_name(func_name, var_name, new_name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid input format")
@@ -90,37 +87,33 @@ def interactive_mode(client: Lattice):
                 result = client.get_all_function_names()
                 print(json.dumps(result, indent=2))
             elif choice == '9':
-                addr = input("Enter function address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.get_function_disassembly(address)
+                    result = client.get_function_disassembly(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    print("Invalid function name")
             elif choice == '10':
-                addr = input("Enter function address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.get_function_pseudocode(address)
+                    result = client.get_function_pseudocode(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    print("Invalid function name")
             elif choice == '11':
-                addr = input("Enter function address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.get_function_variables(address)
+                    result = client.get_function_variables(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    print("Invalid function name")
             elif choice == '12':
-                addr = input("Enter address (hex or decimal): ").strip()
+                name = input("Enter function name: ").strip()
                 try:
-                    address = int(addr, 0)
-                    result = client.get_cross_references_to_address(address)
+                    result = client.get_cross_references_to_function(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    print("Invalid function name")
             elif choice == '13':
                 print("Goodbye!")
                 break

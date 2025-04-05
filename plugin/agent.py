@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class AuthManager:
     """Manages authentication for the Lattice Protocol"""
-    def __init__(self, token_expiry_seconds=7200):
+    def __init__(self, token_expiry_seconds=28800):
         """
         Initialize the authentication manager
         
@@ -216,7 +216,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._require_auth(self._handle_get_function_context_by_address)()
         elif path.startswith('/cross-references/'):
-            self._require_auth(self._handle_get_cross_references_to_address)()
+            self._require_auth(self._handle_get_cross_references_to_function)()
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
     
@@ -346,7 +346,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_all_function_names(self):
         """Handle requests for all function names"""
         try:
-            function_names = [func.name for func in self.protocol.bv.functions]
+            function_names = [{'name': func.name, 'address': func.start} for func in self.protocol.bv.functions]
             self._send_response({
                 'status': 'success',
                 'function_names': function_names
@@ -363,12 +363,9 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 return
             
             new_name = data['name']
-            address = int(self.path.split('/')[-2], 0)
-            res = self.protocol.bv.get_functions_containing(address)
-            func = None
-            if len(res) > 0:
-                func = res[0]
-            else:
+            name = self.path.split('/')[-2]
+            func = self._get_function_by_name(name)
+            if not func:
                 self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
                 return
             
@@ -393,17 +390,15 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 return
             
             new_name = data['name']
-            address = int(self.path.split('/')[-3], 0)
-            res = self.protocol.bv.get_functions_containing(address)
-            func = None
-            if len(res) > 0:
-                func = res[0]
-            else:
-                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+            func_name = self.path.split('/')[-3]
+            func = self._get_function_by_name(func_name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found at address {func_name}'}, 404)
                 return
-            # Find the variable by ID
+
+            # Find the variable by name
             for var in func.vars:
-                if var.identifier == int(self.path.split('/')[-2]):
+                if var.name == self.path.split('/')[-2]:
                     old_name = var.name
                     func.create_user_var(var, var.type, new_name)
                     self._send_response({
@@ -438,41 +433,43 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.error(f"Error adding comment: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
+
+
+    def _get_function_by_name(self, name):
+        """Acquire function by name instead of address"""
+        res = self.protocol.bv.get_functions_by_name(name)
+        # TODO: is there a scenario where there's more than one with the same name?
+        if len(res) > 0:
+            return res[0]
+        else:
+            return None
     
     def _handle_get_function_disassembly(self):
-        """Handle requests for function disassembly"""
+        """Handle requests for function disassembly with function name"""
         try:
-            address = int(self.path.split('/')[-2], 0)
-            res = self.protocol.bv.get_functions_containing(address)
-            func = None
-            if len(res) > 0:
-                func = res[0]
-            else:
-                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+            name = self.path.split('/')[-2]
+            func = self._get_function_by_name(name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
                 return
-            
-            disassembly = self._get_disassembly(func)
-            
-            self._send_response({
-                'status': 'success',
-                'disassembly': disassembly
-            })
-            
+            else:
+                disassembly = self._get_disassembly(func)
+                self._send_response({
+                    'status': 'success',
+                    'disassembly': disassembly
+                })
         except Exception as e:
             logger.error(f"Error getting function disassembly: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_get_function_pseudocode(self):
-        """Handle requests for function pseudocode"""
+        """Handle requests for function pseudocode with function name"""
         try:
-            address = int(self.path.split('/')[-2], 0)
-            res = self.protocol.bv.get_functions_containing(address)
-            func = None
-            if len(res) > 0:
-                func = res[0]
-            else:
-                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+            name = self.path.split('/')[-2]
+            func = self._get_function_by_name(name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found with name: {name}'}, 404)
                 return
             
             pseudocode = self._get_pseudo_c_text(self.protocol.bv, func)
@@ -490,13 +487,10 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_function_variables(self):
         """Handle requests for function variables"""
         try:
-            address = int(self.path.split('/')[-2], 0)
-            res = self.protocol.bv.get_functions_containing(address)
-            func = None
-            if len(res) > 0:
-                func = res[0]
-            else:
-                self._send_response({'status': 'error', 'message': f'No function found at address 0x{address:x}'}, 404)
+            name = self.path.split('/')[-2]
+            func = self._get_function_by_name(name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found with name {name}'}, 404)
                 return
             
             variables = {
@@ -514,19 +508,19 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
-    def _handle_get_cross_references_to_address(self):
-        """Handle requests for cross references to an address"""
+    def _handle_get_cross_references_to_function(self):
+        """Handle requests for cross references to a function"""
         try:
-            address = int(self.path.split('/')[-1], 0)
-            cross_references = self._get_cross_references_to_address(address)
+            name = self.path.split('/')[-2]
+            cross_references = self._get_cross_references_to_function(name)
             if len(cross_references) == 0:
-                self._send_response({'status': 'error', 'message': f'No cross references found for address 0x{address:x}'}, 404)
+                self._send_response({'status': 'error', 'message': f'No cross references found for function {name}'}, 404)
             self._send_response({
                 'status': 'success',
                 'cross_references': cross_references
             })
         except Exception as e:
-            logger.error(f"Error getting cross references to address: {e}")
+            logger.error(f"Error getting cross references to function: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
@@ -599,12 +593,16 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
         return result
     
-    def _get_cross_references_to_address(self, address: int) -> List[Dict[str, Any]]:
-        """Get cross references to an address"""
+    def _get_cross_references_to_function(self, name: str) -> List[Dict[str, Any]]:
+        """Get cross references to a function"""
         result = []
-        for ref in self.protocol.bv.get_code_refs(address):
+        func = self._get_function_by_name(name)
+        if not func:
+            return []
+        for ref in self.protocol.bv.get_code_refs(func.start):
             result.append({
-                'address': ref.address
+                'address': ref.address,
+                'function': func.name
             })
         return result
 

@@ -177,12 +177,12 @@ class Lattice:
             logger.error(f"Error getting all function names: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def update_function_name(self, address: int, new_name: str) -> Optional[Dict[str, Any]]:
+    def update_function_name(self, name: str, new_name: str) -> Optional[Dict[str, Any]]:
         """
         Update the name of a function
         
         Args:
-            address: Address of the function
+            name: Current name of the function
             new_name: New name for the function
             
         Returns:
@@ -190,7 +190,7 @@ class Lattice:
         """
         try:
             response = self.session.put(
-                urljoin(self.base_url, f'/functions/{address}/name'),
+                urljoin(self.base_url, f'/functions/{name}/name'),
                 json={'name': new_name}
             )
             if response.status_code == 200:
@@ -200,7 +200,7 @@ class Lattice:
             logger.error(f"Error updating function name: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def update_variable_name(self, function_address: int, var_id: int, new_name: str) -> Optional[Dict[str, Any]]:
+    def update_variable_name(self, function_name: str, var_name: str, new_name: str) -> Optional[Dict[str, Any]]:
         """
         Update the name of a variable in a function
         
@@ -214,7 +214,7 @@ class Lattice:
         """
         try:
             response = self.session.put(
-                urljoin(self.base_url, f'/variables/{function_address}/{var_id}/name'),
+                urljoin(self.base_url, f'/variables/{function_name}/{var_name}/name'),
                 json={'name': new_name}
             )
             if response.status_code == 200:
@@ -247,18 +247,18 @@ class Lattice:
             logger.error(f"Error adding comment: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    def get_function_disassembly(self, address: int) -> Optional[Dict[str, Any]]:
+    def get_function_disassembly(self, name: str) -> Optional[Dict[str, Any]]:
         """
-        Get disassembly for a function at the specified address
+        Get disassembly for a function with specified function name
         
         Args:
-            address: Address of the function
+            name: Address of the function
             
         Returns:
             Dictionary containing function disassembly
         """
         try:
-            response = self.session.get(urljoin(self.base_url, f'/functions/{address}/disassembly'))
+            response = self.session.get(urljoin(self.base_url, f'/functions/{name}/disassembly'))
             if response.status_code == 200:
                 return response.json()
             return {'status': 'error', 'message': 'Failed to get function disassembly'}
@@ -266,31 +266,31 @@ class Lattice:
             logger.error(f"Error getting function disassembly: {e}")
             return {'status': 'error', 'message': str(e)}
         
-    def get_cross_references_to_address(self, address: int) -> Optional[Dict[str, Any]]:
+    def get_cross_references_to_function(self, name: str) -> Optional[Dict[str, Any]]:
         """
-        Get cross references to an address
+        Get cross references to a function
         """
         try:
-            response = self.session.get(urljoin(self.base_url, f'/cross-references/{address}'))
+            response = self.session.get(urljoin(self.base_url, f'/cross-references/{name}'))
             if response.status_code == 200:
                 return response.json()
-            return {'status': 'error', 'message': 'Failed to get cross references to address'}
+            return {'status': 'error', 'message': 'Failed to get cross references to function'}
         except Exception as e:
-            logger.error(f"Error getting cross references to address: {e}")
+            logger.error(f"Error getting cross references to function: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    def get_function_pseudocode(self, address: int) -> Optional[Dict[str, Any]]:
+    def get_function_pseudocode(self, name: str) -> Optional[Dict[str, Any]]:
         """
-        Get pseudocode for a function at the specified address
+        Get pseudocode for a function with specified function name
         
         Args:
-            address: Address of the function
+            name: Name of the function
             
         Returns:
             Dictionary containing function pseudocode
         """
         try:
-            response = self.session.get(urljoin(self.base_url, f'/functions/{address}/pseudocode'))
+            response = self.session.get(urljoin(self.base_url, f'/functions/{name}/pseudocode'))
             if response.status_code == 200:
                 return response.json()
             return {'status': 'error', 'message': 'Failed to get function pseudocode'}
@@ -298,18 +298,18 @@ class Lattice:
             logger.error(f"Error getting function pseudocode: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    def get_function_variables(self, address: int) -> Optional[Dict[str, Any]]:
+    def get_function_variables(self, name: str) -> Optional[Dict[str, Any]]:
         """
         Get variables for a function at the specified address
         
         Args:
-            address: Address of the function
+            name: Name of function 
             
         Returns:
             Dictionary containing function variables
         """
         try:
-            response = self.session.get(urljoin(self.base_url, f'/functions/{address}/variables'))
+            response = self.session.get(urljoin(self.base_url, f'/functions/{name}/variables'))
             if response.status_code == 200:
                 return response.json()
             return {'status': 'error', 'message': 'Failed to get function variables'}
