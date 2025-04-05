@@ -74,7 +74,7 @@ def get_cross_references_to_function(name: str) -> str:
     """Get cross references to the specified function with function name"""
     response = lattice_client.get_cross_references_to_function(name)
     if response and 'status' in response and response['status'] == 'success':
-        return '\n'.join([f"{ref['address']}" for ref in response['cross_references']])
+        return '\n'.join([f"0x{ref['address']:2x}" for ref in response['cross_references']])
     return f"Error: Could not retrieve cross references for function {name}"
 
 # Initialize and run the server

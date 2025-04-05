@@ -156,10 +156,10 @@ def main():
     command_group.add_argument('--update-variable-name', nargs=3, help='Update variable name: <function_address> <var_id> <new_name>')
     command_group.add_argument('--add-comment-to-address', nargs=2, help='Add comment to address: <address> <comment>')
     command_group.add_argument('--add-comment-to-function', nargs=2, help='Add comment to function: <function_name> <comment>')
-    command_group.add_argument('--get-function-disassembly', type=lambda x: int(x, 0), help='Get function disassembly at address (hex or decimal)')
-    command_group.add_argument('--get-function-pseudocode', type=lambda x: int(x, 0), help='Get function pseudocode at address (hex or decimal)')
-    command_group.add_argument('--get-function-variables', type=lambda x: int(x, 0), help='Get function variables at address (hex or decimal)')
-    command_group.add_argument('--get-cross-references-to-function', type=lambda x: int(x, 0), help='Get cross references to function name')
+    command_group.add_argument('--get-function-disassembly', type=str, help='Get function disassembly for function name')
+    command_group.add_argument('--get-function-pseudocode', type=str, help='Get function pseudocode for function name')
+    command_group.add_argument('--get-function-variables', type=str, help='Get function variables for function name')
+    command_group.add_argument('--get-cross-references-to-function', type=str, help='Get cross references to function name')
     args = parser.parse_args()
     
     # Create client

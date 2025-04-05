@@ -538,7 +538,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_cross_references_to_function(self):
         """Handle requests for cross references to a function"""
         try:
-            name = self.path.split('/')[-2]
+            name = self.path.split('/')[-1]
             cross_references = self._get_cross_references_to_function(name)
             if len(cross_references) == 0:
                 self._send_response({'status': 'error', 'message': f'No cross references found for function {name}'}, 404)
