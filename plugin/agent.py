@@ -4,8 +4,8 @@ from binaryninja.enums import DisassemblyOption
 from binaryninja.function import DisassemblySettings, Function 
 from binaryninja.lineardisassembly import LinearViewCursor, LinearViewObject
 from binaryninja.plugin import PluginCommand
+from binaryninja.log import Logger
 import json
-import logging
 import os
 import secrets
 import time
@@ -18,8 +18,7 @@ from urllib.parse import urlparse
 import threading
 import os
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = Logger(session_id=0, logger_name=__name__)
 
 class AuthManager:
     """Manages authentication for the Lattice Protocol"""
@@ -35,7 +34,7 @@ class AuthManager:
         
         # Generate a secure API key on startup
         self.api_key = secrets.token_hex(16)
-        logger.info(f"API key: {self.api_key}")
+        logger.log_info(f"API key: {self.api_key}")
     
     def generate_token(self, client_info: Dict[str, Any]) -> str:
         """
@@ -66,7 +65,7 @@ class AuthManager:
         Returns:
             Tuple of (is_valid, client_info)
         """
-        logger.info(f"Validating token: {token}")
+        logger.log_info(f"Validating token: {token}")
         if token not in self.tokens:
             return False, None
         
@@ -173,7 +172,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         elif path.startswith('/comments/'):
             self._require_auth(self._handle_add_comment_to_address)(data)
         elif path.startswith('/functions/'):
-            logger.info(f"Handling add comment to function request: {data}")
+            logger.log_info(f"Handling add comment to function request: {data}")
             self._require_auth(self._handle_add_comment_to_function)(data)
         else:
             self._send_response({'status': 'error', 'message': 'Invalid endpoint'}, 404)
@@ -240,7 +239,6 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 return
         
         if password:
-            print(f"Verifying credentials for {username} with password {password}")
             if self.protocol.auth_manager.verify_credentials(password):
                 client_info = {'username': username, 'address': self.client_address[0]}
                 new_token = self.protocol.auth_manager.generate_token(client_info)
@@ -766,12 +764,9 @@ class BinjaLattice:
         """Start the HTTP server"""
         try:
             if self.use_ssl:
-                logger.info("Starting server with SSL")
+                logger.log_info("Starting server with SSL")
                 cert_file = os.path.join(os.path.dirname(__file__), "server.crt")
                 key_file = os.path.join(os.path.dirname(__file__), "server.key")
-                
-                if not (os.path.exists(cert_file) and os.path.exists(key_file)):
-                    self._generate_self_signed_cert(cert_file, key_file)
                 
                 self.server = HTTPServer((self.host, self.port), 
                     lambda *args, **kwargs: LatticeRequestHandler(*args, protocol=self, **kwargs))
@@ -788,52 +783,21 @@ class BinjaLattice:
             server_thread.daemon = True
             server_thread.start()
             
-            logger.info(f"Server started on {self.host}:{self.port}")
-            logger.info(f"Authentication API key: {self.auth_manager.api_key}")
-            logger.info(f"Use this key to authenticate clients")
+            logger.log_info(f"Server started on {self.host}:{self.port}")
+            logger.log_info(f"Authentication API key: {self.auth_manager.api_key}")
+            logger.log_info(f"Use this key to authenticate clients")
             
         except Exception as e:
             logger.error(f"Failed to start server: {e}")
             logger.error("Stack trace: %s", traceback.format_exc())
             self.stop_server()
     
-    def _generate_self_signed_cert(self, cert_file, key_file):
-        """Generate self-signed certificate for development purposes"""
-        from OpenSSL import crypto
-        
-        # Create a key pair
-        k = crypto.PKey()
-        k.generate_key(crypto.TYPE_RSA, 2048)
-        
-        # Create a self-signed cert
-        cert = crypto.X509()
-        cert.get_subject().C = "Canada"
-        cert.get_subject().ST = "Province"
-        cert.get_subject().L = "Locality"
-        cert.get_subject().O = "BinjaLattice"
-        cert.get_subject().OU = "BinjaLattice Server"
-        cert.get_subject().CN = self.host
-        cert.set_serial_number(1000)
-        cert.gmtime_adj_notBefore(0)
-        cert.gmtime_adj_notAfter(365*24*60*60)
-        cert.set_issuer(cert.get_subject())
-        cert.set_pubkey(k)
-        cert.sign(k, 'sha256')
-        
-        # Write to disk
-        with open(cert_file, "wb") as f:
-            f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-        with open(key_file, "wb") as f:
-            f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
-        
-        logger.info(f"Self-signed certificate generated at {cert_file}")
-    
     def stop_server(self):
         """Stop the server"""
         if self.server:
             self.server.shutdown()
             self.server.server_close()
-            logger.info("Server stopped")
+            logger.log_info("Server stopped")
     
     def _get_segments_info(self) -> List[Dict[str, Any]]:
         """Get information about binary segments"""
@@ -867,7 +831,7 @@ class BinjaLattice:
 # Example usage as a plugin
 def register_plugin_command(view):
     # This now has the option to enable SSL
-    protocol = BinjaLattice(view, use_ssl=True)
+    protocol = BinjaLattice(view, use_ssl=False)
     protocol.start_server()
     return protocol
 

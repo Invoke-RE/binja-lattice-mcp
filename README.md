@@ -1,12 +1,12 @@
 # BinjaLattice
 
-BinjaLattice is a secure communication protocol for Binary Ninja that enables interaction with external Model Context Protocol (MCP) servers and tools. It provides a structured way to exchange binary analysis data between Binary Ninja and external systems.
+BinjaLattice is a secure communication protocol for Binary Ninja that enables interaction with external Model Context Protocol (MCP) servers and tools. It provides a structured way to acquire information from Binary Ninja and the ability to modify an active Binary Ninja database over HTTP with a REST API.
 
 ## Features
 
 - **Secure Authentication**: Token-based authentication system
 - **Encrypted Communication**: Optional SSL/TLS encryption
-- **Binary Analysis Context**: Export function context, basic blocks, variables, etc.
+- **Binary Analysis Context**: Export pseudocode, disassembly, variable names, binary information etc.
 - **Binary Modification**: Update function names, add comments, rename variables
 - **Token Management**: Automatic expiration and renewal of authentication tokens
 
@@ -17,10 +17,10 @@ BinjaLattice is a secure communication protocol for Binary Ninja that enables in
    - macOS: `~/Library/Application Support/Binary Ninja/plugins/`
    - Windows: `%APPDATA%\Binary Ninja\plugins\`
 
-2. Required Python dependencies:
-   - `pyOpenSSL` (for SSL certificate generation)
-   - `requests` (for HTTP client functionality)
-   - Install with: `pip install pyOpenSSL requests`
+2. Create a virtual environment `pip -m venv venv-test` (or your preferred dependency manager)
+
+3. Activate your virtual environment and install required Python dependencies:
+   - Install with: `pip install -r requirements.txt` (or your preferred method)
 
 ## Usage
 
@@ -36,7 +36,7 @@ Example MCP configuration (`mcp.json`) from Cursor:
 {
     "mcpServers": {
       "binja-lattice-mcp": {
-        "command": "/path/to/python",
+        "command": "/path/to/venv/bin/python",
         "args": ["/path/to/mcp_server.py"],
         "env": {
             "BNJLAT": "your_api_key_here"
@@ -145,7 +145,7 @@ python lattice_client.py --username user --password YOUR_API_KEY --add-comment-t
 
 - The API key is generated randomly on server start and shown in the Binary Ninja log
 - Tokens expire after 8 hours by default
-- SSL/TLS uses a self-signed certificate for development; replace with proper certificates for production use
+- SSL/TLS requires a certificate and key be provided by the user (disabled by default)
 - All requests require authentication via API key or token
 - The server runs locally by default on port 9000
 
