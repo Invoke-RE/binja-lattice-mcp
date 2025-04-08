@@ -574,6 +574,10 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         return result
 
     def _get_pseudo_c_text(self, bv: BinaryView, function: Function) -> List[str]:
+        """
+        Get pseudo-c text for a function, big thanks to Asher Devila L.
+        for help with this https://github.com/AsherDLL/PCDump-bn/blob/main/__init__.py
+        """
         lines = []
         settings = DisassemblySettings()
         settings.set_option(DisassemblyOption.ShowAddress, True)
@@ -828,9 +832,7 @@ class BinjaLattice:
             })
         return result
 
-# Example usage as a plugin
 def register_plugin_command(view):
-    # This now has the option to enable SSL
     protocol = BinjaLattice(view, use_ssl=False)
     protocol.start_server()
     return protocol
@@ -840,4 +842,10 @@ PluginCommand.register(
     "Start Lattice Protocol Server",
     "Start server for Binary Ninja Lattice protocol with authentication",
     register_plugin_command
+)
+
+PluginCommand.register(
+    "Stop Lattice Protocol Server",
+    "Stop server for Binary Ninja Lattice protocol",
+    stop_lattice_protocol_server
 )
