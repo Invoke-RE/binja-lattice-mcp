@@ -2,6 +2,11 @@
 
 BinjaLattice is a secure communication protocol for Binary Ninja that enables interaction with external Model Context Protocol (MCP) servers and tools. It provides a structured way to acquire information from Binary Ninja and the ability to modify an active Binary Ninja database over HTTP with a REST API.
 
+## Demo
+
+[![BinjaLattice Demo](https://img.youtube.com/vi/xfDRVn0VIA0/0.jpg)](https://www.youtube.com/watch?v=xfDRVn0VIA0)
+
+
 ## Features
 
 - **Secure Authentication**: Token-based authentication system
