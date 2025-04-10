@@ -12,7 +12,7 @@ BinjaLattice is a secure communication protocol for Binary Ninja that enables in
 
 ## Installation
 
-1. Copy `agent.py` to your Binary Ninja plugins directory:
+1. Copy `lattice_server_plugin.py` to your Binary Ninja plugins directory:
    - Linux: `~/.binaryninja/plugins/`
    - macOS: `~/Library/Application Support/Binary Ninja/plugins/`
    - Windows: `%APPDATA%\Binary Ninja\plugins\`
@@ -151,7 +151,7 @@ python lattice_client.py --username user --password YOUR_API_KEY --add-comment-t
 
 ## Development
 
-- The main server implementation is in `plugin/agent.py`
+- The main server implementation is in `plugin/lattice_server_plugin.py`
 - MCP server implementation is in `mcp_server.py`
 - Client library is in `lib/lattice.py`
 
@@ -159,7 +159,7 @@ python lattice_client.py --username user --password YOUR_API_KEY --add-comment-t
 
 To add new functionality:
 
-1. Add new endpoint handlers in `LatticeRequestHandler` class in `agent.py`
+1. Add new endpoint handlers in `LatticeRequestHandler` class in `lattice_server_plugin.py`
 2. Add corresponding client methods in `Lattice` class in `lib/lattice.py`
 3. Add new MCP tools in `mcp_server.py`
 

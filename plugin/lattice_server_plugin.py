@@ -832,12 +832,20 @@ class BinjaLattice:
             })
         return result
 
+protocol_instances = {}
+
 def register_plugin_command(view):
     protocol = BinjaLattice(view, use_ssl=False)
     protocol.start_server()
+    protocol_instances[view] = protocol
     return protocol
 
-# Register plugin
+def stop_lattice_protocol_server(view):
+    protocol = protocol_instances.get(view)
+    if protocol:
+        protocol.stop_server()
+        del protocol_instances[view]
+
 PluginCommand.register(
     "Start Lattice Protocol Server",
     "Start server for Binary Ninja Lattice protocol with authentication",
