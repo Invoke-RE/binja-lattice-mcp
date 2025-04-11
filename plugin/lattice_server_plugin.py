@@ -274,8 +274,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error getting binary info: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting binary info: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _get_function_context(self, address: int) -> Dict[str, Any]:
@@ -315,8 +315,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error getting function context: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting function context: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_get_function_context_by_name(self):
@@ -340,8 +340,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 'function': function_info
             })
         except Exception as e:
-            logger.error(f"Error getting function context by name: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting function context by name: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_get_all_function_names(self):
@@ -353,7 +353,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 'function_names': function_names
             })
         except Exception as e:
-            logger.error(f"Error getting all function names: {e}")
+            logger.log_error(f"Error getting all function names: {e}")
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_update_function_name(self, data):
@@ -379,8 +379,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error updating function name: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error updating function name: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_update_variable_name(self, data):
@@ -411,8 +411,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             self._send_response({'status': 'error', 'message': f'No variable with ID {self.path.split("/")[-1]} found in function'}, 404)
             
         except Exception as e:
-            logger.error(f"Error updating variable name: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error updating variable name: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_add_comment_to_address(self, data):
@@ -431,8 +431,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error adding comment: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error adding comment: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_add_comment_to_function(self, data):
@@ -456,15 +456,24 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error adding comment: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error adding comment: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _get_function_by_name(self, name):
         """Acquire function by name instead of address"""
+        logger.log_info(f"Getting function by name: {name}")
         res = self.protocol.bv.get_functions_by_name(name)
         # TODO: is there a scenario where there's more than one with the same name?
         if len(res) > 0:
+            return res[0]
+        else:
+            return None
+
+    def _get_function_by_address(self, address):
+        """Acquire function by address instead of name"""
+        res = self.protocol.bv.get_functions_containing(address)
+        if res:
             return res[0]
         else:
             return None
@@ -484,8 +493,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                     'disassembly': disassembly
                 })
         except Exception as e:
-            logger.error(f"Error getting function disassembly: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting function disassembly: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_get_function_pseudocode(self):
@@ -505,8 +514,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error getting function pseudocode: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting function pseudocode: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _handle_get_function_variables(self):
@@ -529,15 +538,24 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            logger.error(f"Error getting function variables: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting function variables: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_get_cross_references_to_function(self):
-        """Handle requests for cross references to a function"""
+        """Handle requests for cross references to a function by address or name"""
         try:
-            name = self.path.split('/')[-1]
-            cross_references = self._get_cross_references_to_function(name)
+            val = self.path.split('/')[-1]
+            logger.log_info(f"Getting cross references to function: {val}")
+            if val.startswith('0x'):
+                val = int(val, 0)
+                func = self._get_function_by_address(val)
+            else:
+                func = self._get_function_by_name(val)
+            if func is None:
+                self._send_response({'status': 'error', 'message': f'No function found with name {val}'}, 404)
+                return
+            cross_references = self._get_cross_references_to_function(func.name)
             if len(cross_references) == 0:
                 self._send_response({'status': 'error', 'message': f'No cross references found for function {name}'}, 404)
             self._send_response({
@@ -545,8 +563,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 'cross_references': cross_references
             })
         except Exception as e:
-            logger.error(f"Error getting cross references to function: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Error getting cross references to function: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
     def _get_llil_text(self, func) -> List[str]:
@@ -792,8 +810,8 @@ class BinjaLattice:
             logger.log_info(f"Use this key to authenticate clients")
             
         except Exception as e:
-            logger.error(f"Failed to start server: {e}")
-            logger.error("Stack trace: %s", traceback.format_exc())
+            logger.log_error(f"Failed to start server: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
             self.stop_server()
     
     def stop_server(self):
