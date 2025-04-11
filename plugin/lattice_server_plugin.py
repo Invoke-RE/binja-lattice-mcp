@@ -641,15 +641,20 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
         return result
     
     def _get_cross_references_to_function(self, name: str) -> List[Dict[str, Any]]:
-        """Get cross references to a function"""
+        """
+        Get cross references to a function by name.
+        This returns functions containing cross-reference locations,
+        instead of the actual cross-reference locations.
+        """
         result = []
         func = self._get_function_by_name(name)
         if not func:
             return []
         for ref in self.protocol.bv.get_code_refs(func.start):
+            called_func = self.protocol.bv.get_functions_containing(ref.address)[0]
             result.append({
                 'address': ref.address,
-                'function': func.name
+                'function': called_func.name
             })
         return result
 
