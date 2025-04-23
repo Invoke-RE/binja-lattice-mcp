@@ -1,5 +1,7 @@
 from lib.lattice import Lattice
-import argparse, sys, json
+import argparse, sys, json, logging
+
+logger = logging.getLogger(__name__)
 
 def print_menu():
     """Print the interactive menu"""
@@ -38,14 +40,14 @@ def interactive_mode(client: Lattice):
                     result = client.get_function_context(address)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid address format")
+                    logger.error("Invalid address format")
             elif choice == '3':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_context_by_name(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
                     
             elif choice == '4':
                 name = input("Enter function name: ").strip()
@@ -54,7 +56,7 @@ def interactive_mode(client: Lattice):
                     result = client.update_function_name(name, new_name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
                     
             elif choice == '5':
                 func_name = input("Enter function name: ").strip()
@@ -64,7 +66,7 @@ def interactive_mode(client: Lattice):
                     result = client.update_variable_name(func_name, var_name, new_name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid input format")
+                    logger.error("Invalid input format")
                     
             elif choice == '6':
                 name = input("Enter function name: ").strip()
@@ -73,13 +75,13 @@ def interactive_mode(client: Lattice):
                     result = client.add_comment_to_function(name, comment)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
             elif choice == '7':
                 address = input("Enter address (hex or decimal): ").strip()
                 comment = input("Enter comment: ").strip()
                 try:
                     result = client.add_comment_to_address(address, comment)
-                    print(json.dumps(result, indent=2))
+                    logger.error(json.dumps(result, indent=2))
                 except ValueError:
                     print("Invalid address format")
             elif choice == '8':
@@ -89,7 +91,7 @@ def interactive_mode(client: Lattice):
                     if client.auth_token:
                         print("Previous authentication token is still valid")
                 else:
-                    print("Failed to reconnect")
+                    logger.error("Failed to reconnect")
             elif choice == '9':
                 result = client.get_all_function_names()
                 print(json.dumps(result, indent=2))
@@ -99,28 +101,28 @@ def interactive_mode(client: Lattice):
                     result = client.get_function_disassembly(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
             elif choice == '11':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_pseudocode(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
             elif choice == '12':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_function_variables(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
             elif choice == '13':
                 name = input("Enter function name: ").strip()
                 try:
                     result = client.get_cross_references_to_function(name)
                     print(json.dumps(result, indent=2))
                 except ValueError:
-                    print("Invalid function name")
+                    logger.error("Invalid function name")
             elif choice == '14':
                 print("Goodbye!")
                 break
@@ -131,7 +133,7 @@ def interactive_mode(client: Lattice):
             print("\nGoodbye!")
             break
         except Exception as e:
-            print(f"Error: {e}")
+            logger.error(f"Error: {e}")
             print("Try reconnecting to the server (option 8)")
 
 def main():
