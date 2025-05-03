@@ -1,7 +1,7 @@
 from lib.lattice import Lattice
 import argparse, sys, json, logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(session_id=0, logger_name=__name__)
 
 def print_menu():
     """Print the interactive menu"""

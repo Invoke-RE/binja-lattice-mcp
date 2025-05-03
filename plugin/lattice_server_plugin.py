@@ -5,18 +5,17 @@ from binaryninja.function import DisassemblySettings, Function
 from binaryninja.lineardisassembly import LinearViewCursor, LinearViewObject
 from binaryninja.plugin import PluginCommand
 from binaryninja.log import Logger
+from typing import Optional, Dict, Any, List, Tuple
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
 import json
 import os
 import secrets
 import time
 import ssl
-from typing import Optional, Dict, Any, List, Tuple
 import re
 import traceback
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
 import threading
-import os
 
 logger = Logger(session_id=0, logger_name=__name__)
 
