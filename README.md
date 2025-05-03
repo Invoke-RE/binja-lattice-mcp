@@ -169,6 +169,12 @@ To add new functionality:
 2. Add corresponding client methods in `Lattice` class in `lib/lattice.py`
 3. Add new MCP tools in `mcp_server.py`
 
+### Running Tests
+
+1. Create a Python virtual environment and install the `requirements.txt`
+2. Install the Binary Ninja Python API with the `install_api.py` provided in your Binary Ninja installation directory
+3. Run the tests with `pytest tests/ -v`
+
 ## License
 
 [MIT License](LICENSE) 
