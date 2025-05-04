@@ -154,6 +154,40 @@ def test_variable_operations(lattice_server):
     assert len(vars_info["parameters"]) == len(main_func.parameter_vars)
     assert len(vars_info["local_variables"]) == len(main_func.vars)
 
+def test_variable_name_update(lattice_server):
+    """Test variable name update endpoint"""
+    base = lattice_server["base"]
+    bv = lattice_server["bv"]
+    token = test_auth_succeeds_with_valid_credentials(lattice_server)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Test getting variables for main function
+    main_func = next(f for f in bv.functions if f.name == "_main")
+    r = requests.get(
+        f"{base}/functions/{main_func.name}/variables",
+        headers=headers
+    )
+    assert r.status_code == 200
+    vars_info = r.json()["variables"]
+    var_name = vars_info["local_variables"][0]["name"]
+    # Test updating variable name
+    r = requests.put(
+        f"{base}/variables/{main_func.name}/{var_name}/name",
+        headers=headers,
+        json={"name": "new_var_name"}
+    )
+    print(r.json())
+    assert r.status_code == 200
+    r = requests.get(
+        f"{base}/functions/{main_func.name}/variables",
+        headers=headers
+    )
+    assert r.status_code == 200
+    vars_info = r.json()["variables"]
+    print(vars_info)
+    # This assumes that the variables maintain order after being renamed
+    assert vars_info["local_variables"][0]["name"] == "new_var_name"
+
 def test_cross_references(lattice_server):
     """Test cross-reference endpoints"""
     base = lattice_server["base"]

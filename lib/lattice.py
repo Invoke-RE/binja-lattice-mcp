@@ -205,8 +205,8 @@ class Lattice:
         Update the name of a variable in a function
         
         Args:
-            function_address: Address of the function containing the variable
-            var_id: ID of the variable to rename
+            function_name: Name of the function containing the variable
+            var_name: Name of the variable to rename
             new_name: New name for the variable
             
         Returns:

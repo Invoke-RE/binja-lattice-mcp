@@ -400,14 +400,14 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             for var in func.vars:
                 if var.name == self.path.split('/')[-2]:
                     old_name = var.name
-                    func.create_user_var(var, var.type, new_name)
+                    var.name = new_name
                     self._send_response({
                         'status': 'success',
                         'message': f'Variable name updated from "{old_name}" to "{new_name}"'
                     })
                     return
             
-            self._send_response({'status': 'error', 'message': f'No variable with ID {self.path.split("/")[-1]} found in function'}, 404)
+            self._send_response({'status': 'error', 'message': f'No variable with name {self.path.split("/")[-1]} found in function'}, 404)
             
         except Exception as e:
             logger.log_error(f"Error updating variable name: {e}")

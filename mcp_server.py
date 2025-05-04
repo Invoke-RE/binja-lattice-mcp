@@ -70,6 +70,14 @@ def get_function_variables(name: str) -> str:
     return f"Error: Could not retrieve function variables for function {name}"
 
 @mcp.tool()
+def update_variable_name(function_name: str, var_name: str, new_name: str) -> str:
+    """Update the name of a variable"""
+    response = lattice_client.update_variable_name(function_name, var_name, new_name)
+    if response and 'status' in response and response['status'] == 'success':
+        return f"Successfully renamed variable {var_name} to {new_name}"
+    return f"Error: Could not update variable name {var_name}"
+
+@mcp.tool()
 def get_cross_references_to_function(name: str) -> str:
     """Get cross references to the specified function with function name"""
     response = lattice_client.get_cross_references_to_function(name)
