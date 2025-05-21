@@ -224,6 +224,19 @@ class Lattice:
             logger.error(f"Error updating variable name: {e}")
             return {'status': 'error', 'message': str(e)}
     
+    def get_global_variable_data(self, function_name: str, global_var_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get data for a global variable
+        """
+        try:
+            response = self.session.get(urljoin(self.base_url, f'/global_variable_data/{function_name}/{global_var_name}'))
+            if response.status_code == 200:
+                return response.json()
+            return {'status': 'error', 'message': 'Failed to get global variable data'}
+        except Exception as e:
+            logger.error(f"Error getting global variable data: {e}")
+            return {'status': 'error', 'message': str(e)}
+    
     def add_comment_to_address(self, address: int, comment: str) -> Optional[Dict[str, Any]]:
         """
         Add a comment at the specified address

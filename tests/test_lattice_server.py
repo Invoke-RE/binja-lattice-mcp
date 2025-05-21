@@ -153,6 +153,9 @@ def test_variable_operations(lattice_server):
     # Assert variables match BinaryView
     assert len(vars_info["parameters"]) == len(main_func.parameter_vars)
     assert len(vars_info["local_variables"]) == len(main_func.vars)
+    # This should be dynamic in case binja changes their pointer ref implementation etc.
+    # Leaving it for now because getting function globals is a pain.
+    assert len(vars_info["global_variables"]) == 4
 
 def test_variable_name_update(lattice_server):
     """Test variable name update endpoint"""
@@ -176,7 +179,6 @@ def test_variable_name_update(lattice_server):
         headers=headers,
         json={"name": "new_var_name"}
     )
-    print(r.json())
     assert r.status_code == 200
     r = requests.get(
         f"{base}/functions/{main_func.name}/variables",
@@ -187,6 +189,24 @@ def test_variable_name_update(lattice_server):
     print(vars_info)
     # This assumes that the variables maintain order after being renamed
     assert vars_info["local_variables"][0]["name"] == "new_var_name"
+
+def test_get_global_variable_data(lattice_server):
+    """Test getting data for a global variable"""
+    base = lattice_server["base"]
+    bv = lattice_server["bv"]
+    token = test_auth_succeeds_with_valid_credentials(lattice_server)
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # This is a global variable in the main function
+    # as per our returned convention because it is unnamed
+    r = requests.get(
+        f"{base}/global_variable_data/_main/data_100003f90",
+        headers=headers
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "success"
+    assert "Hello, World!" in data["message"]
 
 def test_cross_references(lattice_server):
     """Test cross-reference endpoints"""

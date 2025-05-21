@@ -66,7 +66,11 @@ def get_function_variables(name: str) -> str:
     """Get variables for the function"""
     response = lattice_client.get_function_variables(name)
     if response and 'status' in response and response['status'] == 'success':
-        return 'Parameters: ' + '\n'.join([f"{param['name']}: {param['type']}" for param in response['variables']['parameters']]) + '\nLocal Variables: ' + '\n'.join([f"{var['name']}: {var['type']}" for var in response['variables']['local_variables']])
+        rstr = 'Parameters: ' + '\n'.join([f"{param['name']}: {param['type']}" for param in response['variables']['parameters']]) \
+        + '\nLocal Variables: ' + '\n'.join([f"{var['name']}: {var['type']}" for var in response['variables']['local_variables']]) \
+        + '\nGlobal Variables: ' + '\n'.join([f"{var['name']}: {var['type']}" for var in response['variables']['global_variables']])
+        return rstr
+
     return f"Error: Could not retrieve function variables for function {name}"
 
 @mcp.tool()
@@ -76,6 +80,14 @@ def update_variable_name(function_name: str, var_name: str, new_name: str) -> st
     if response and 'status' in response and response['status'] == 'success':
         return f"Successfully renamed variable {var_name} to {new_name}"
     return f"Error: Could not update variable name {var_name}"
+
+@mcp.tool()
+def get_global_variable_data(function_name: str, global_var_name: str) -> str:
+    """Get data pointed to by a global variable name"""
+    response = lattice_client.get_global_variable_data(function_name, global_var_name)
+    if response and 'status' in response and response['status'] == 'success':
+        return response['message']
+    return f"Error: Could not retrieve global variable data for function {function_name} and variable {global_var_name}"
 
 @mcp.tool()
 def get_cross_references_to_function(name: str) -> str:

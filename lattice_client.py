@@ -1,7 +1,7 @@
 from lib.lattice import Lattice
 import argparse, sys, json, logging
 
-logger = logging.getLogger(session_id=0, logger_name=__name__)
+logger = logging.getLogger(__name__)
 
 def print_menu():
     """Print the interactive menu"""
@@ -19,7 +19,8 @@ def print_menu():
     print("11. Get Function Pseudocode")
     print("12. Get Function Variables")
     print("13. Get Cross References to Function")
-    print("14. Exit")
+    print("14. Get Global Variable Data")
+    print("15. Exit")
     print()
 
 def interactive_mode(client: Lattice):
@@ -27,7 +28,7 @@ def interactive_mode(client: Lattice):
     while True:
         print_menu()
         try:
-            choice = input("Enter your choice (1-14): ").strip()
+            choice = input("Enter your choice (1-15): ").strip()
             
             if choice == '1':
                 result = client.get_binary_info()
@@ -124,6 +125,14 @@ def interactive_mode(client: Lattice):
                 except ValueError:
                     logger.error("Invalid function name")
             elif choice == '14':
+                func_name = input("Enter function name: ").strip()
+                var_name = input("Enter variable name: ").strip()
+                try:
+                    result = client.get_global_variable_data(func_name, var_name)
+                    print(json.dumps(result, indent=2))
+                except ValueError:
+                    logger.error("Invalid function name")
+            elif choice == '15':
                 print("Goodbye!")
                 break
             else:

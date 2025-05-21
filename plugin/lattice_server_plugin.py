@@ -216,6 +216,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 self._require_auth(self._handle_get_function_variables)()
             else:
                 self._require_auth(self._handle_get_function_context_by_address)()
+        elif path.startswith('/global_variable_data'):
+            self._require_auth(self._handle_get_global_variable_data)()
         elif path.startswith('/cross-references/'):
             self._require_auth(self._handle_get_cross_references_to_function)()
         else:
@@ -294,6 +296,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             'basic_blocks': self._get_basic_blocks_info(func),
             'parameters': self._get_parameters(func),
             'variables': self._get_variables(func),
+            'global_variables': self._get_global_variables(),
             'disassembly': self._get_disassembly(func),
             'incoming_calls': self._get_incoming_calls(func)
         }
@@ -406,6 +409,22 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                         'message': f'Variable name updated from "{old_name}" to "{new_name}"'
                     })
                     return
+            """
+                We need to handle the case where the LLM is trying to change
+                the name of a global variable. We need to find the global and
+                rename it.
+            """
+            for var in self._get_globals_from_func(func):
+                current_var_name = self.path.split('/')[-2]
+                if var['name'] == current_var_name:
+                    for addr, gvar in self.protocol.bv.data_vars.items():
+                        if addr == var['location']:
+                            gvar.name = new_name
+                            self._send_response({
+                                'status': 'success',
+                                'message': f'Variable name updated from "{current_var_name}" to "{new_name}"'
+                            })
+                            return
             
             self._send_response({'status': 'error', 'message': f'No variable with name {self.path.split("/")[-1]} found in function'}, 404)
             
@@ -413,7 +432,54 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.log_error(f"Error updating variable name: {e}")
             logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
-    
+
+    def _handle_get_global_variable_data(self):
+        """Handle requests access data from a global address"""
+        try:
+            func_name = self.path.split('/')[-2]
+            func = self._get_function_by_name(func_name)
+            if not func:
+                self._send_response({'status': 'error', 'message': f'No function found at address {func_name}'}, 404)
+                return
+            # Find the variable by name
+            global_name = self.path.split('/')[-1]
+            """
+                We need to handle the case where the LLM is trying to change
+                the name of a global variable. We need to find the global and
+                rename it.
+            """
+            for var in self._get_globals_from_func(func):
+                if var['name'] == global_name:
+                    for addr, gvar in self.protocol.bv.data_vars.items():
+                        if addr == var['location']:
+                            read_address = None
+                            rbytes = None
+                            if gvar.value:
+                                target_val = gvar.value
+                                # Getting the .value for a value found with heuristics
+                                # will actually return this value. If it's an int
+                                # then it's likely a pointer for us to follow.
+                                if isinstance(target_val, bytes):
+                                    rbytes = target_val
+                                elif isinstance(target_val, int):
+                                    read_address = target_val
+                            else:
+                                read_address = addr
+
+                            # If there is not a defined value at address, then read
+                            # an arbitrary amount of data as a last ditch effort.
+                            if read_address and not rbytes:
+                                rbytes = self.protocol.bv.read(read_address, 256)
+                            self._send_response({
+                                'status': 'success',
+                                'message': f'Byte slice from global: {rbytes}'
+                            })
+                            return
+        except Exception as e:
+            logger.log_error(f"Error updating variable name: {e}")
+            logger.log_error("Stack trace: %s" % traceback.format_exc())
+            self._send_response({'status': 'error', 'message': str(e)}, 500)
+
     def _handle_add_comment_to_address(self, data):
         """Handle requests to add a comment to an address"""
         try:
@@ -517,6 +583,48 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
+    def _is_global_ptr(self, obj):
+        """Callback to look for a HighLevelILConstPtr in instruction line"""
+        if(isinstance(obj, HighLevelILConstPtr)):
+            return obj
+
+    def _get_globals_from_func(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
+        """Get global variables in a given HLIL function"""
+        res = []
+        gvar_results = []
+        """
+            We enumerate all instructions in basic blocks to find
+            pointers to global variables. We recursively enumerate
+            each instruction line for HighLevelILConstPtr to do this.
+        """
+        for bb in func.hlil:
+            for instr in bb:
+                res += (list(instr.traverse(self._is_global_ptr)))
+
+        """
+            Once we find a pointer, we get the pointer's address value
+            and find the data variable that this corresponds to in
+            order to find the variable's name. Unnamed variables
+            in the format of data_[address] return None for their name
+            so we need to format this ourselves to match the pseudocode
+            output.
+        """
+        for r in res:
+            address = r.constant
+            for gaddr, gvar in self.protocol.bv.data_vars.items():
+                if address == gaddr:
+                    var_name = None
+                    if not gvar.name:
+                        var_name = f"data_{address:2x}"
+                    else:
+                        var_name = gvar.name
+                    gvar_results.append({
+                        'name': var_name,
+                        'type': str(gvar.type),
+                        'location': gaddr
+                    })
+        return gvar_results
+
     def _handle_get_function_variables(self):
         """Handle requests for function variables"""
         try:
@@ -528,7 +636,8 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             
             variables = {
                 'parameters': self._get_parameters(func),
-                'local_variables': self._get_variables(func)
+                'local_variables': self._get_variables(func),
+                'global_variables': self._get_globals_from_func(func)
             }
             
             self._send_response({
@@ -566,7 +675,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             logger.log_error("Stack trace: %s" % traceback.format_exc())
             self._send_response({'status': 'error', 'message': str(e)}, 500)
     
-    def _get_llil_text(self, func) -> List[str]:
+    def _get_llil_text(self, func: binaryninja.function.Function) -> List[str]:
         """Get LLIL text for a function"""
         result = []
         for block in func.llil:
@@ -574,7 +683,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 result.append({'address': instruction.address, 'text': str(instruction)})
         return result
     
-    def _get_mlil_text(self, func) -> List[str]:
+    def _get_mlil_text(self, func: binaryninja.function.Function) -> List[str]:
         """Get MLIL text for a function"""
         result = []
         for block in func.mlil:
@@ -582,7 +691,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 result.append({'address': instruction.address, 'text': str(instruction)})
         return result
     
-    def _get_hlil_text(self, func) -> List[str]:
+    def _get_hlil_text(self, func: binaryninja.function.Function) -> List[str]:
         """Get HLIL text for a function"""
         result = []
         for block in func.hlil:
@@ -627,7 +736,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                     result.append({'address': addr, 'text': pseudo_c})
             return result
     
-    def _get_call_sites(self, func) -> List[Dict[str, Any]]:
+    def _get_call_sites(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get call sites within a function"""
         result = []
         for ref in func.call_sites:
@@ -657,7 +766,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
         return result
 
-    def _get_basic_blocks_info(self, func) -> List[Dict[str, Any]]:
+    def _get_basic_blocks_info(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get information about basic blocks in a function"""
         result = []
         for block in func.basic_blocks:
@@ -669,7 +778,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
         return result
     
-    def _get_parameters(self, func) -> List[Dict[str, Any]]:
+    def _get_parameters(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get information about function parameters"""
         result = []
         for param in func.parameter_vars:
@@ -680,7 +789,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             })
         return result
     
-    def _get_variables(self, func) -> List[Dict[str, Any]]:
+    def _get_variables(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get information about function variables"""
         result = []
         for var in func.vars:
@@ -691,8 +800,19 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 'id': var.identifier
             })
         return result
+
+    def _get_global_variables(self) -> List[Dict[str, Any]]:
+        """Get information about global variables"""
+        result = []
+        for address, var in self.protocol.bv.data_vars.items():
+            result.append({
+                'name': var.name,
+                'type': str(var.type),
+                'location': address
+            })
+        return result
     
-    def _get_disassembly(self, func) -> List[Dict[str, Any]]:
+    def _get_disassembly(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get disassembly for a function"""
         result = []
         for block in func:
@@ -708,7 +828,7 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
                 })
         return result
     
-    def _get_incoming_calls(self, func) -> List[Dict[str, Any]]:
+    def _get_incoming_calls(self, func: binaryninja.function.Function) -> List[Dict[str, Any]]:
         """Get incoming calls to a function"""
         result = []
         for ref in self.protocol.bv.get_code_refs(func.start):
