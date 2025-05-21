@@ -60,6 +60,7 @@ The following tools are available through the MCP server:
 - `get_binary_info`: Get information about the binary being analyzed
 - `update_function_name`: Update the name of a function
 - `update_variable_name`: Change variable name within function to specified name
+- `get_global_variable_data`: Get data from global variable
 - `add_comment_to_address`: Add a comment to a specific address
 - `add_comment_to_function`: Add a comment to a function
 - `get_function_disassembly`: Get disassembly for a function
