@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/invoke-re-binja-lattice-mcp-badge.png)](https://mseep.ai/app/invoke-re-binja-lattice-mcp)
+
 ![BinjaLattice Logo](img/lattice-logo.png)
 
 # BinjaLattice
