@@ -37,6 +37,7 @@ Write-Host ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $PluginSource = Join-Path $RepoRoot "plugin\lattice_server_plugin.py"
+$PluginConfigSource = Join-Path $RepoRoot "plugin\config.ini"
 $McpServerPath = Join-Path $RepoRoot "mcp_server.py"
 $RequirementsPath = Join-Path $RepoRoot "requirements.txt"
 $VenvPath = Join-Path $RepoRoot ".venv"
@@ -81,9 +82,9 @@ if (-not (Test-Path $PluginSource)) {
 }
 Write-Host ""
 
-# ============================================
-# STEP 2: Install Binary Ninja plugin
-# ============================================
+# ================================================
+# STEP 2: Install Binary Ninja plugin & Config
+# ================================================
 Write-Host "[STEP 2/4] Installing Binary Ninja plugin..." -ForegroundColor Cyan
 
 $PluginDest = Join-Path $BNPluginsDir "lattice_server_plugin.py"
@@ -103,6 +104,23 @@ else {
     Write-Host "          Plugin installed to:" -ForegroundColor Green
     Write-Host "          $PluginDest" -ForegroundColor White
 }
+Write-Host ""
+
+$PluginConfigDest = Join-Path $BNPluginsDir "config.ini"
+if (Test-Path $PluginConfigSource) {
+    # Only copies if the file doesn't exist to avoid wiping user configs
+    if (-not (Test-Path $PluginConfigDest)) {
+        Copy-Item -Path $PluginConfigSource -Destination $PluginConfigDest
+        Write-Host "          Default config.ini created." -ForegroundColor Green
+    }
+    else {
+        Write-Host "          Existing config.ini found. Keeping current settings." -ForegroundColor Cyan
+    }
+}
+else {
+    Write-Host "          Config.ini source not found in repo. Without this file default settings will be assumed." -ForegroundColor Yellow
+}
+
 Write-Host ""
 
 # ============================================
@@ -131,17 +149,26 @@ Write-Host ""
 # ============================================
 # STEP 4: Install dependencies
 # ============================================
-Write-Host "[STEP 4/4] Installing dependencies..." -ForegroundColor Cyan
 
-try {
-    & $VenvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Null
-    & $VenvPython -m pip install mcp requests --quiet 2>&1 | Out-Null
-    Write-Host "          Dependencies installed (mcp, requests)" -ForegroundColor Green
+if (Test-Path $RequirementsPath) {
+    try {
+        Write-Host "          Updating pip..." -ForegroundColor Gray
+        & $VenvPython -m pip install --upgrade pip --quiet 2>&1 | Out-Null
+        
+        Write-Host "          Installing packages..." -ForegroundColor Gray
+        & $VenvPython -m pip install -r $RequirementsPath --quiet 2>&1 | Out-Null
+        
+        Write-Host "          Dependencies installed successfully." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] Failed to install dependencies: $_" -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
 }
-catch {
-    Write-Host "[ERROR] Failed to install dependencies: $_" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
+else {
+    Write-Host "[WARNING] requirements.txt not found. Installing base defaults..." -ForegroundColor Yellow
+    & $VenvPython -m pip install mcp requests --quiet
 }
 Write-Host ""
 

@@ -1,13 +1,16 @@
 from binaryninja import *
 from binaryninja.binaryview import BinaryView
 from binaryninja.enums import DisassemblyOption
-from binaryninja.function import DisassemblySettings, Function 
+from binaryninja.function import DisassemblySettings, Function
 from binaryninja.lineardisassembly import LinearViewCursor, LinearViewObject
 from binaryninja.plugin import PluginCommand
 from binaryninja.log import Logger
 from typing import Optional, Dict, Any, List, Tuple
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
+from pathlib import Path
+import configparser
+import socket
 import json
 import os
 import secrets
@@ -19,9 +22,72 @@ import threading
 
 logger = Logger(session_id=0, logger_name=__name__)
 
+class LatticeConfig:
+    """Manages config values."""
+    def __init__(self, config_filename="config.ini"):
+        # Generate a secure API key on startup
+        self.new_api_key = secrets.token_hex(16)
+
+        self.config = configparser.ConfigParser()
+        plugin_dir = os.path.dirname(os.path.realpath(__file__))
+        config_path = os.path.join(plugin_dir, config_filename)
+
+        if os.path.exists(config_path):
+            try:
+                self.config.read(config_path)
+            except Exception as e:
+                logger.log_error(f"Error reading config.ini: {e}")
+                logger.log_error(f"Using default values")
+
+    def get_host(self, default="127.0.0.1"):
+        ip_address = self.config.get("lattice", "ip_address", fallback=default)
+        try:
+            socket.inet_aton(ip_address)
+            self.ip_address = ip_address
+        except socket.error:
+            logger.log_error(f"Invalid IP Address in config.ini: {ip_address}. Falling back to default (localhost)")
+            self.ip_address = default
+
+    def get_port(self, default=9000):
+        """Currently only accepting ports between 1024 and 65535 because Binja won't likely have privileges to run on lower ports [1 to 1023]"""
+
+        val = self.config.get("lattice", "port", fallback=str(default))
+        try:
+            port_int = int(val)
+            if 1024 <= port_int <= 65535:
+                self.port = port_int
+            else:
+                logger.log_error(f"Trying to use privileged port: '{val}'. Using default instead: {default}")
+                self.port = default
+        except ValueError:
+            logger.log_error(f"Invalid port '{val}'. Using default {default}")
+            self.port = default
+            pass
+
+    def get_api_key(self):
+        """Uses the config.ini API Key if valid, otherwise, on initialization creates a new one."""
+        try:
+            api_key_conf = self.config.get("lattice", "api_key")
+            self.api_key = api_key_conf.strip() if api_key_conf.strip() else self.new_api_key
+        except (configparser.NoOptionError, configparser.NoSectionError):
+            self.api_key = self.new_api_key
+
+
+    def get_use_ssl(self, default=False):
+        """Checks if SSL should be used. For configparser everything is a string, so we need to check if the inputs are bools"""
+        val = self.config.get("lattice", "use_ssl", fallback=str(default))
+
+        if val == "True":
+            self.use_ssl = True
+        elif val == "False":
+            self.use_ssl = False
+        else:
+            logger.log_error(f"Value of 'use_ssl' must be either 'True' or 'False'. Got '{val}'.")
+            self.use_ssl = default
+
 class AuthManager:
     """Manages authentication for the Lattice Protocol"""
-    def __init__(self, token_expiry_seconds=28800):
+    def __init__(self, config: LatticeConfig, token_expiry_seconds=28800):
         """
         Initialize the authentication manager
         
@@ -31,10 +97,11 @@ class AuthManager:
         self.token_expiry_seconds = token_expiry_seconds
         self.tokens = {}  # Map of token -> (expiry_time, client_info)
         
-        # Generate a secure API key on startup
-        self.api_key = secrets.token_hex(16)
+        config.get_api_key()
+        self.api_key = config.api_key
         logger.log_info(f"API key: {self.api_key}")
-    
+        
+
     def generate_token(self, client_info: Dict[str, Any]) -> str:
         """
         Generate a new authentication token
@@ -1980,7 +2047,7 @@ class BinjaLattice:
     responses to integrate back into the Binary Ninja UI.
     """
     
-    def __init__(self, bv: BinaryView, port: int = 9000, host: str = "localhost", use_ssl: bool = False):
+    def __init__(self, bv: BinaryView, config: LatticeConfig):
         """
         Initialize the model context protocol.
         
@@ -1990,13 +2057,31 @@ class BinjaLattice:
             host: Host address for the server
             use_ssl: Whether to use SSL/TLS encryption
         """
-        self.bv = bv
-        self.port = port
-        self.host = host
-        self.use_ssl = use_ssl
-        self.auth_manager = AuthManager()
+        self._bv = bv
+
+        config.get_host()
+        config.get_port()
+        config.get_use_ssl()
+
+        self.port = config.port
+        self.host = config.ip_address
+        self.use_ssl = config.use_ssl
+
+        self.auth_manager = AuthManager(config)
         self.server = None
-    
+
+    @property
+    def bv(self):
+        """
+        Dynamically retrieves the current BinaryView every time "self.bv" is accessed.
+        Uses the original view type (e.g. "PE", "ELF") to fetch the live view from the
+        file metadata, ensuring operations like bv.read() reflect UI state changes such
+        as a manual rebase or re-analysis without needing to restart Lattice MCP.
+        """
+        view_type = self._bv.view_type
+        updated = self._bv.file.get_view_of_type(view_type)
+        return updated if updated is not None else self._bv
+
     def start_server(self):
         """Start the HTTP server"""
         try:
@@ -2068,7 +2153,9 @@ class BinjaLattice:
 protocol_instances = {}
 
 def register_plugin_command(view):
-    protocol = BinjaLattice(view, use_ssl=False)
+    config = LatticeConfig()
+
+    protocol = BinjaLattice(view, config)
     protocol.start_server()
     protocol_instances[view] = protocol
     return protocol
