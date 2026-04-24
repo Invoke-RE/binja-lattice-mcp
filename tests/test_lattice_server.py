@@ -4,12 +4,13 @@ import time
 import requests
 import pytest
 import binaryninja
+from binaryninja import HighLevelILConstPtr
 
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from plugin.lattice_server_plugin import BinjaLattice
+from plugin.lattice_server_plugin import BinjaLattice, LatticeConfig
 
 @pytest.fixture(scope="module")
 def bv():
@@ -20,7 +21,17 @@ def bv():
 @pytest.fixture(scope="module")
 def lattice_server(bv):
     """Start the Lattice server and yield its configuration"""
-    protocol = BinjaLattice(bv, host="127.0.0.1", port=0)
+    # Build a LatticeConfig and override the value-loading hooks so the server
+    # binds to localhost on an ephemeral port regardless of any on-disk config.
+    config = LatticeConfig()
+    config.ip_address = "127.0.0.1"
+    config.port = 0
+    config.use_ssl = False
+    config.get_host = lambda *a, **kw: None
+    config.get_port = lambda *a, **kw: None
+    config.get_use_ssl = lambda *a, **kw: None
+
+    protocol = BinjaLattice(bv, config)
     protocol.start_server()
     # Give it a moment to bind
     time.sleep(0.1)
@@ -153,9 +164,22 @@ def test_variable_operations(lattice_server):
     # Assert variables match BinaryView
     assert len(vars_info["parameters"]) == len(main_func.parameter_vars)
     assert len(vars_info["local_variables"]) == len(main_func.vars)
-    # This should be dynamic in case binja changes their pointer ref implementation etc.
-    # Leaving it for now because getting function globals is a pain.
-    assert len(vars_info["global_variables"]) == 4
+
+    # Compute the expected global-variable set by replicating the server's
+    # HLIL const-pointer traversal. This keeps the assertion accurate even if
+    # Binary Ninja's analysis surfaces a different number of pointer refs.
+    expected_global_addrs = set()
+    for bb in main_func.hlil:
+        for instr in bb:
+            for ptr in instr.traverse(
+                lambda o: o if isinstance(o, HighLevelILConstPtr) else None
+            ):
+                if ptr.constant in bv.data_vars:
+                    expected_global_addrs.add(ptr.constant)
+
+    actual_global_addrs = {g["location"] for g in vars_info["global_variables"]}
+    assert actual_global_addrs == expected_global_addrs
+    assert len(vars_info["global_variables"]) == len(expected_global_addrs)
 
 def test_variable_name_update(lattice_server):
     """Test variable name update endpoint"""
