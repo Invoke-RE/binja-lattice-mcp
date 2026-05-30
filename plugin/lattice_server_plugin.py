@@ -41,6 +41,8 @@ class LatticeConfig:
 
     def get_host(self, default="127.0.0.1"):
         ip_address = self.config.get("lattice", "ip_address", fallback=default)
+        ip_address = ip_address.strip("\",")
+
         try:
             socket.inet_aton(ip_address)
             self.ip_address = ip_address
@@ -52,6 +54,7 @@ class LatticeConfig:
         """Currently only accepting ports between 1024 and 65535 because Binja won't likely have privileges to run on lower ports [1 to 1023]"""
 
         val = self.config.get("lattice", "port", fallback=str(default))
+        val = val.strip("\"'")
         try:
             port_int = int(val)
             if 1024 <= port_int <= 65535:
@@ -68,10 +71,12 @@ class LatticeConfig:
         """Uses the config.ini API Key if valid, otherwise, on initialization creates a new one."""
         try:
             api_key_conf = self.config.get("lattice", "api_key")
-            self.api_key = api_key_conf.strip() if api_key_conf.strip() else self.new_api_key
+            if api_key_conf:
+                self.api_key = api_key_conf.strip("\"'")
+            else:
+                api_key_conf = self.new_api_key
         except (configparser.NoOptionError, configparser.NoSectionError):
             self.api_key = self.new_api_key
-
 
     def get_use_ssl(self, default=False):
         """Checks if SSL should be used. For configparser everything is a string, so we need to check if the inputs are bools"""
@@ -411,17 +416,40 @@ class LatticeRequestHandler(BaseHTTPRequestHandler):
             self._send_response({'status': 'error', 'message': str(e)}, 500)
 
     def _handle_get_imports(self):
-        """Handle requests for imported functions in the binary"""
+        """Handle requests for imported symbols in the binary"""
         try:
             imports_list = []
-            for sym in self.protocol.bv.get_symbols_of_type(SymbolType.ImportedFunctionSymbol):
-                # Convert NameSpace to string for JSON serialization
-                library = str(sym.namespace) if sym.namespace else ''
-                imports_list.append({
-                    'name': sym.name,
-                    'address': sym.address,
-                    'library': library
-                })
+            seen = set()
+
+            def get_library(sym):
+                # Imported PE symbols store the DLL name in the Binary Ninja namespace.
+                tmp_library = str(sym.namespace) if sym.namespace else ''
+                return '' if tmp_library == 'BNINTERNALNAMESPACE' else tmp_library
+
+            import_symbol_type_names = [
+                'ImportedFunctionSymbol',
+                'ImportedDataSymbol',
+                'ImportAddressSymbol',
+            ]
+
+            for sym_type_name in import_symbol_type_names:
+                sym_type = getattr(SymbolType, sym_type_name, None)
+                if sym_type is None:
+                    continue
+
+                for sym in self.protocol.bv.get_symbols_of_type(sym_type):
+                    library = get_library(sym)
+                    key = (sym.address, sym.name, library)
+                    if key in seen:
+                        continue
+
+                    seen.add(key)
+                    imports_list.append({
+                        'name': sym.name,
+                        'address': sym.address,
+                        'library': library,
+                        'type': str(sym.type)
+                    })
 
             self._send_response({
                 'status': 'success',
